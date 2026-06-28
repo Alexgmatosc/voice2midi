@@ -147,6 +147,15 @@ void VoiceToMidiProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
     // Prepare Spectral Analyzer
     spectralAnalyzer.prepare();
+
+    // Prepare Beatbox Engine components
+    onsetDetector.prepare(sampleRate);
+    drumClassifier.prepare(sampleRate);
+    for (auto& drum : activeDrumNotes)
+    {
+        drum.noteNumber = -1;
+        drum.samplesRemaining = 0;
+    }
 }
 
 void VoiceToMidiProcessor::releaseResources()
@@ -211,15 +220,69 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     float currentDb = envelopeFollower.getCurrentEnvelopeDb();
     bool isGateOpen = (currentDb > gateThreshold);
 
-    // 1. Zero-Crossing Rate Noise rejection (bypass YIN and close gate if unvoiced sibilant noise)
-    bool isUnvoicedNoise = noiseRejecter.isUnvoiced(inData, buffer.getNumSamples(), 0.15f);
-    if (isUnvoicedNoise)
+    int trackingMode = static_cast<int>(*trackingModeParameter);
+    bool runMelody = (trackingMode == 0 || trackingMode == 2);
+    bool runBeatbox = (trackingMode == 1 || trackingMode == 2);
+
+    // 1. Beatbox Drum Engine (Sub-block slicing for sub-2ms response)
+    if (runBeatbox)
     {
-        isGateOpen = false;
+        int numSamples = buffer.getNumSamples();
+        for (int offset = 0; offset < numSamples; offset += 64)
+        {
+            int subBlockSize = std::min(64, numSamples - offset);
+            
+            if (onsetDetector.process(inData + offset, subBlockSize))
+            {
+                int drumNote = drumClassifier.classify(inData + offset, subBlockSize);
+                
+                // Channel 10 for MIDI Drums (General MIDI standard)
+                midiMessages.addEvent(juce::MidiMessage::noteOn(10, drumNote, static_cast<juce::uint8>(100)), offset);
+                
+                // Schedule Note Off exactly 50ms later
+                int releaseSamples = static_cast<int>(getSampleRate() * 0.05);
+                for (auto& drum : activeDrumNotes)
+                {
+                    if (drum.noteNumber == -1)
+                    {
+                        drum.noteNumber = drumNote;
+                        drum.samplesRemaining = releaseSamples;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
+    // 2. Active Drum Note Off scheduler (countdown)
+    for (auto& drum : activeDrumNotes)
+    {
+        if (drum.noteNumber != -1)
+        {
+            drum.samplesRemaining -= buffer.getNumSamples();
+            if (drum.samplesRemaining <= 0)
+            {
+                midiMessages.addEvent(juce::MidiMessage::noteOff(10, drum.noteNumber), 0);
+                drum.noteNumber = -1;
+                drum.samplesRemaining = 0;
+            }
+        }
+    }
+
+    // 3. Sibilant Rejection for Melody tracking (bypassed in beatbox-only mode)
+    bool gateOpenForMelody = isGateOpen && runMelody;
+    if (runMelody)
+    {
+        bool isUnvoicedNoise = noiseRejecter.isUnvoiced(inData, buffer.getNumSamples(), 0.15f);
+        if (isUnvoicedNoise)
+        {
+            gateOpenForMelody = false;
+        }
+    }
+
+    // 4. Melody Pitch Tracker (YIN)
     float detectedPitchHz = -1.0f;
-    if (isGateOpen)
+    if (gateOpenForMelody)
     {
         // Read the most recent 2048 samples from the circular buffer
         float window[2048];
@@ -230,7 +293,7 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         
         float rawPitch = pitchDetector.process(window, 2048, minFreq, maxFreq);
         
-        // 2. Median filter only valid pitch estimates to reject transient glitches/octave jumps
+        // Median filter only valid pitch estimates to reject transient glitches/octave jumps
         if (rawPitch > 0.0f)
         {
             detectedPitchHz = medianFilter.filter(rawPitch);
@@ -242,9 +305,9 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         medianFilter.reset();
     }
 
-    int trackingMode = static_cast<int>(*trackingModeParameter);
+    // 5. Timbre CC modulation (Vowels)
     float normCentroid = 0.0f;
-    if (isGateOpen && (trackingMode == 0 || trackingMode == 2))
+    if (gateOpenForMelody)
     {
         // Read the most recent 1024 samples for spectral analysis
         float fftWindow[1024];
@@ -272,7 +335,7 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     // We pass the linear amplitude to map to MIDI velocity
     float linearVel = envelopeFollower.getCurrentEnvelope();
     
-    midiGenerator.processBlock(isGateOpen, detectedPitchHz, linearVel, bendRangeSemi,
+    midiGenerator.processBlock(gateOpenForMelody, detectedPitchHz, linearVel, bendRangeSemi,
                                scaleRoot, scaleType, glideMs,
                                normCentroid, targetCC,
                                buffer.getNumSamples(), midiMessages);

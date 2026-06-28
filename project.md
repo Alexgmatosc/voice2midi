@@ -153,19 +153,17 @@ $$x$$
 
  Add a TimbreMeter component to the UI for visual feedback of the vowel shape.
 
-Phase 9: Percussion Engine (Beatbox to Drums) 
+Phase 9: Percussion Engine (Beatbox to Drums) ✅
 
-$$CURRENT$$
-
-$$$$
+$$x$$
 
  Implement an OnsetDetector that operates in parallel to the Pitch Detector, reacting in $< 2\text{ ms}$ using energy derivatives.
 
-$$$$
+$$x$$
 
  Implement a DrumClassifier to quickly categorize the transient (Kick, Snare, Hi-Hat) using basic ZCR and frequency band energy.
 
-$$$$
+$$x$$
 
  Update VoiceToMidiProcessor to route drum events strictly to MIDI Channel 10 when tracking_mode allows it.
 

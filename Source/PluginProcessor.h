@@ -9,6 +9,8 @@
 #include "DSP/MedianFilter.h"
 #include "DSP/NoiseRejecter.h"
 #include "DSP/SpectralAnalyzer.h"
+#include "DSP/OnsetDetector.h"
+#include "DSP/DrumClassifier.h"
 
 class VoiceToMidiProcessor : public juce::AudioProcessor
 {
@@ -73,6 +75,15 @@ private:
     v2m::MedianFilter medianFilter;
     v2m::NoiseRejecter noiseRejecter;
     v2m::SpectralAnalyzer spectralAnalyzer;
+    v2m::OnsetDetector onsetDetector;
+    v2m::DrumClassifier drumClassifier;
+
+    struct ActiveDrumNote
+    {
+        int noteNumber = -1;
+        int samplesRemaining = 0;
+    };
+    ActiveDrumNote activeDrumNotes[8] = {};
 
     std::atomic<float> currentLevelDb { -100.0f };
     std::atomic<float> currentPitchHz { -1.0f };
