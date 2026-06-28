@@ -19,6 +19,7 @@ void MidiEventGenerator::reset()
     currentlyPlayingNote = -1;
     stableFreqHz = 0.0f;
     smoothedPitchBend = 8192.0f;
+    lastSentCCValue = -1;
 }
 
 float MidiEventGenerator::hzToMidi(float hz) const
@@ -28,7 +29,9 @@ float MidiEventGenerator::hzToMidi(float hz) const
 }
 
 void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
-                                      int scaleRoot, int scaleType, float glideMs, int numSamples, juce::MidiBuffer& midiMessages)
+                                      int scaleRoot, int scaleType, float glideMs,
+                                      float normalizedCentroid, int targetCC,
+                                      int numSamples, juce::MidiBuffer& midiMessages)
 {
     // State transitions based on Gate
     if (!isGateOpen)
@@ -85,6 +88,17 @@ void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, flo
             break;
             
         case State::Sustain:
+            // 1. Timbre CC modulation output based on Spectral Centroid
+            {
+                int targetCCValue = juce::jlimit(0, 127, juce::roundToInt(normalizedCentroid * 127.0f));
+                if (targetCCValue != lastSentCCValue)
+                {
+                    midiMessages.addEvent(juce::MidiMessage::controllerEvent(1, targetCC, targetCCValue), sampleOffset);
+                    lastSentCCValue = targetCCValue;
+                }
+            }
+
+            // 2. Pitch Bend & Legato note triggering
             if (detectedFreqHz > 0.0f)
             {
                 float exactMidi = hzToMidi(detectedFreqHz);
@@ -138,6 +152,7 @@ void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, flo
                 midiMessages.addEvent(juce::MidiMessage::noteOff(1, currentlyPlayingNote), sampleOffset);
                 currentlyPlayingNote = -1;
                 smoothedPitchBend = 8192.0f;
+                lastSentCCValue = -1;
                 midiMessages.addEvent(juce::MidiMessage::pitchWheel(1, 8192), sampleOffset); // Reset bend
             }
             currentState = State::Silence;

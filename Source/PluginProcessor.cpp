@@ -17,6 +17,8 @@ VoiceToMidiProcessor::VoiceToMidiProcessor()
     scaleRootParameter = apvts.getRawParameterValue("scale_root");
     scaleTypeParameter = apvts.getRawParameterValue("scale_type");
     pitchBendGlideParameter = apvts.getRawParameterValue("pitch_bend_glide");
+    trackingModeParameter = apvts.getRawParameterValue("tracking_mode");
+    expressionCCParameter = apvts.getRawParameterValue("expression_cc");
 }
 
 VoiceToMidiProcessor::~VoiceToMidiProcessor()
@@ -53,6 +55,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout VoiceToMidiProcessor::create
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID("pitch_bend_glide", 1), "Pitch Bend Glide (ms)", 0.0f, 200.0f, 0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID("tracking_mode", 1), "Tracking Mode",
+        juce::StringArray{"Melody", "Beatbox", "Hybrid"}, 0));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID("expression_cc", 1), "Expression Target CC",
+        juce::StringArray{"1 - ModWheel", "74 - Brightness/Timbre", "11 - Expression"}, 1));
 
     return layout;
 }
@@ -134,6 +144,9 @@ void VoiceToMidiProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
 
     // Prepare Median Filter (3-tap window)
     medianFilter.prepare(3);
+
+    // Prepare Spectral Analyzer
+    spectralAnalyzer.prepare();
 }
 
 void VoiceToMidiProcessor::releaseResources()
@@ -229,6 +242,21 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         medianFilter.reset();
     }
 
+    int trackingMode = static_cast<int>(*trackingModeParameter);
+    float normCentroid = 0.0f;
+    if (isGateOpen && (trackingMode == 0 || trackingMode == 2))
+    {
+        // Read the most recent 1024 samples for spectral analysis
+        float fftWindow[1024];
+        circularBuffer.readRecent(fftWindow, 1024);
+        float centroidHz = spectralAnalyzer.calculateCentroid(fftWindow, getSampleRate());
+        
+        // Normalize the centroid: 300Hz (dark, Closed Vowel) to 2000Hz (bright, Open Vowel)
+        normCentroid = (centroidHz - 300.0f) / (2000.0f - 300.0f);
+        normCentroid = juce::jlimit(0.0f, 1.0f, normCentroid);
+    }
+    currentCentroid.store(normCentroid);
+
     // Convert APVTS choice parameter to actual semitones (0=1, 1=2, 2=12, 3=24)
     int bendChoice = static_cast<int>(*pitchBendRangeParameter);
     int bendRangeSemi = (bendChoice == 0) ? 1 : (bendChoice == 1) ? 2 : (bendChoice == 2) ? 12 : 24;
@@ -237,11 +265,17 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     int scaleType = static_cast<int>(*scaleTypeParameter);
     float glideMs = *pitchBendGlideParameter;
 
+    int expressionCCIndex = static_cast<int>(*expressionCCParameter);
+    // choice 0 is CC 1 (ModWheel), 1 is CC 74 (Brightness), 2 is CC 11 (Expression)
+    int targetCC = (expressionCCIndex == 0) ? 1 : (expressionCCIndex == 1) ? 74 : 11;
+
     // We pass the linear amplitude to map to MIDI velocity
     float linearVel = envelopeFollower.getCurrentEnvelope();
     
     midiGenerator.processBlock(isGateOpen, detectedPitchHz, linearVel, bendRangeSemi,
-                               scaleRoot, scaleType, glideMs, buffer.getNumSamples(), midiMessages);
+                               scaleRoot, scaleType, glideMs,
+                               normCentroid, targetCC,
+                               buffer.getNumSamples(), midiMessages);
 
     currentLevelDb.store(currentDb);
     currentPitchHz.store(detectedPitchHz);

@@ -1,11 +1,11 @@
-SYSTEM CONTEXT & TECHNICAL SPECIFICATION (V3 - EXTENDED & POST-MVP)
+SYSTEM CONTEXT & TECHNICAL SPECIFICATION (V4 - "DUBLER" EXPERIENCE & POST-MVP)
 
-Project: Low-Latency Voice-to-MIDI Converter (Standalone & Plugin)
-Role of the AI: You are a Senior C++ Audio DSP Architect specialized in the JUCE framework. Your goal is to write highly optimized, real-time safe, and mathematically rigorous audio processing code.
+Project: Pro Vocal MIDI Controller (Voice-to-MIDI & Beatbox-to-MIDI)
+Role of the AI: You are a Senior C++ Audio DSP Architect specialized in the JUCE 8 framework. Your goal is to write highly optimized, real-time safe, and mathematically rigorous audio processing code to create a multi-dimensional vocal controller.
 
 1. PROJECT OBJECTIVE & SCOPE
 
-Develop a C++ application/plugin using JUCE 8 that captures a monophonic microphone input (human voice), detects the fundamental frequency (pitch) and amplitude envelope with extremely low latency ($< 10\text{ ms}$), and outputs the corresponding MIDI Note On/Off, Velocity, and Pitch Bend events in real-time to control external synthesizers.
+Transform the existing Voice-to-MIDI MVP into a premium real-time vocal instrument. The application/plugin must capture monophonic microphone input to detect pitch (Melody) with extremely low latency ($< 10\text{ ms}$), extract timbral characteristics (Vowels mapped to MIDI CC), and instantly detect transient unvoiced bursts (Beatbox mapped to Drum MIDI).
 
 2. TECH STACK & BUILD SYSTEM
 
@@ -15,9 +15,9 @@ Framework: JUCE 8.
 
 Build System: CMake (juce_add_plugin with FORMATS Standalone VST3 AU).
 
-Core Algorithm: YIN Algorithm (or pYIN) for pitch detection.
+Core Algorithms: YIN Algorithm (Pitch), Spectral Centroid via FFT (Timbre), Energy Derivative (Onset/Beatbox).
 
-Parameter Management: juce::AudioProcessorValueTreeState (APVTS) for all UI-to-Processor parameters.
+Parameter Management: juce::AudioProcessorValueTreeState (APVTS).
 
 3. STRICT REAL-TIME AUDIO THREAD CONSTRAINTS (CRITICAL)
 
@@ -31,137 +31,168 @@ NO System Calls: No printf, std::cout, file I/O, or network calls inside process
 
 Parameter Reading: Read parameters via std::atomic<float>* cached pointers provided by APVTS, never via string lookups during the audio callback.
 
+FFT Efficiency: Any Fast Fourier Transform (FFT) must use pre-allocated windowing and operate on specific sizes (e.g., 512 or 1024) to avoid CPU spikes.
+
 4. ARCHITECTURE & COMPONENT OVERVIEW
 
-4.1. Core DSP Classes
+4.1. Core DSP Classes (Existing & Refined)
 
-VoiceToMidiProcessor: Inherits from juce::AudioProcessor. Manages the APVTS, the audio I/O, and the MIDI buffer.
+VoiceToMidiProcessor: Inherits from juce::AudioProcessor. Manages the APVTS, audio I/O, and MIDI buffer.
 
-PitchDetector (YIN):
+PitchDetector (YIN): Dynamic search window based on min/max parameters, processing overlapping windows for high temporal resolution.
 
-Maintains a pre-allocated internal Circular Buffer (Ring Buffer).
+MedianFilter & NoiseRejecter: Filters outliers and rejects sibilants (ZCR) to stabilize the pitch state machine.
 
-Because YIN requires a minimum window size (e.g., 1024 or 2048 samples) to detect low frequencies (like 65Hz), but the host might send blocks of 64 or 128 samples, this class MUST accumulate samples and process overlapping windows (e.g., 50% or 75% overlap) to maintain high temporal resolution (low latency) while providing enough data to the YIN math.
+4.2. New Core DSP Components (The "Dubler" Upgrade)
 
-EnvelopeFollower: Calculates the RMS or Peak amplitude of the incoming signal to determine if the voice is active (Gate) and maps this to MIDI Velocity.
+SpectralAnalyzer (Timbre Engine):
 
-MedianFilter: A running sliding filter to reject transient frequency outliers and sudden octave-doubling jumps before sending pitch to the state machine.
+Integrates juce::dsp::FFT.
 
-NoiseRejecter: Computes Zero-Crossing Rate (ZCR) or Spectral Flatness to bypass the pitch detector instantly when unvoiced sibilants ("S", "T", "F") are present.
+Extracts the Spectral Centroid (brightness/vowel shape) from the audio block to differentiate between closed vowels (e.g., "Ooo") and open vowels (e.g., "Aaa").
 
-4.2. MIDI State Machine (Crucial Logic)
+Maps this continuous value to a user-selectable MIDI CC (e.g., CC 74 or CC 1) to control synthesizer filters.
 
-To prevent "MIDI machine-gunning" (triggering multiple notes due to natural vocal vibrato or noise), implement a strict State Machine inside MidiEventGenerator:
+OnsetDetector & DrumClassifier (Beatbox Engine):
 
-State: SILENCE. If EnvelopeFollower amplitude $<$ Gate Threshold or the NoiseRejecter flags unvoiced noise.
+Onset Detection: Calculates the energy difference between consecutive micro-blocks (e.g., 64 samples). An instant spike triggers a drum event, bypassing the YIN latency.
 
-State: ATTACK. Amplitude crosses Gate Threshold. Wait for PitchDetector (plus MedianFilter) to return a stable fundamental frequency for at least DebounceTime (e.g., 5ms-10ms). Generate MIDI Note On.
+Lightweight Classification: Uses Low/High band energy ratios and ZCR to output Kick (Note 36), Snare (Note 38), or Hi-Hat (Note 42) exclusively on MIDI Channel 10.
 
-State: SUSTAIN. While amplitude remains above threshold:
+4.3. MIDI State Machine (Crucial Logic)
 
-If the detected pitch fluctuates within $\pm 1$ semitone, DO NOT trigger a new note. Calculate the cent deviation and output MIDI Pitch Bend messages to bend the currently playing note.
+State: SILENCE. Amplitude $<$ Gate Threshold or unvoiced noise.
 
-If the detected pitch jumps significantly ($> 1$ semitone) and stays stable, generate MIDI Note Off for the old note, and MIDI Note On for the new note (Legato transition).
+State: ATTACK. Amplitude crosses threshold. Debounce timer starts (5ms-10ms). Generates MIDI Note On (Ch 1).
 
-State: RELEASE. Amplitude drops below Gate Threshold. Send MIDI Note Off. Clear pitch bend.
+State: SUSTAIN.
 
-4.3. UI & Visual Components (Custom Editor)
+Pitch Bend: Outputs microtonal Pitch Bend if drift is $< 1$ semitone.
 
-WaveformVisualizer: A lock-free component reading downsampled audio data from a FIFO queue to paint the rolling input waveform.
+Legato: If drift is $> 1$ semitone, generates Note Off/Note On sequence.
 
-GateLineOverlay: A horizontal, semi-transparent line representing the current gate_threshold parameter mapped to the visual limits of the waveform, supporting interactive dragging to update the parameter.
+$$NEW$$
 
-HUDDisplay: Highly visible, large typography component showing the currently played note (e.g., "C3", "F#4") when active, or "---" when silent.
+ Timbre Control: Continuously outputs MIDI CC messages based on the Spectral Centroid fluctuations.
 
-TuningNeedle: Cent-deviation gauge displaying fractional tuning offset ($\pm 50$ cents) in sync with pitch bend.
+State: RELEASE. Amplitude drops. Send MIDI Note Off. Clear pitch bend.
+
+4.4. UI & Visual Components (Custom Editor)
+
+WaveformVisualizer & GateLineOverlay: Lock-free scrolling waveform with an interactive, draggable threshold line.
+
+HUDDisplay & TuningNeedle: Prominent active note display with a cent-deviation gauge.
+
+$$NEW$$
+
+ TimbreMeter: Vertical bar showing the current Spectral Centroid value (Vowel mapping).
 
 5. USER PARAMETERS (APVTS DEFINITION)
 
 The APVTS layout must register and maintain the following parameter nodes:
 
-input_gain: Float (-24.0 dB to +24.0 dB).
+input_gain & gate_threshold: Amplitude and sensitivity.
 
-gate_threshold: Float (-60.0 dB to 0.0 dB). Below this, silence is assumed.
+pitch_bend_range & pitch_bend_glide: Pitch wheel scaling and smoothing.
 
-pitch_bend_range: Choice (1, 2, 12, 24 semitones). Scale coefficient for Pitch Bend.
+min_frequency & max_frequency: YIN optimization limits.
 
-min_frequency: Float (40 Hz to 200 Hz). Limits the maximum YIN search window ($\tau$).
+scale_root & scale_type: Musical quantization grids.
 
-max_frequency: Float (300 Hz to 2000 Hz). Limits the minimum YIN search window.
+$$NEW$$
 
-scale_root: Choice (C, C#, D, ... B). Semitone offsets (0-11) for Scale Quantization. [NEW]
+ tracking_mode: Choice (Melody, Beatbox, Hybrid). Determines active engines.
 
-scale_type: Choice (Chromatic, Major, Minor, Pentatonic). Quantizer modes. [NEW]
+$$NEW$$
 
-pitch_bend_glide: Float (0.0 ms to 200.0 ms). Temporal smoothing of pitch-wheel events. [NEW]
+ expression_cc: Choice (1 - ModWheel, 74 - Timbre/Brightness, 11 - Expression). Target for vowel mapping.
 
 6. IMPLEMENTATION ROADMAP FOR AI
 
-Phase 1: Project Setup & Parameters ✅
+Phase 1-7: Core MVP & Refinement ✅
 
-[x] Generate the CMakeLists.txt using FetchContent for JUCE 8.
+$$x$$
 
-[x] Implement the AudioProcessor skeleton and the AudioProcessorValueTreeState setup with parameters.
+ Project Setup, juce_add_plugin integration, and real-time safe constraints established.
 
-[x] Setup basic generic GUI using juce::GenericAudioProcessorEditor for validation.
+$$x$$
 
-Phase 2: Audio Capture & Envelope Following ✅
+ Audio Capture, CircularBuffer, and EnvelopeFollower.
 
-[x] Implement the internal lock-free CircularBuffer logic in processBlock.
+$$x$$
 
-[x] Implement the EnvelopeFollower (Peak/RMS) to detect voice presence against the gate threshold.
+ YinPitchDetector math and optimization.
 
-Phase 3: DSP Engine (YIN Pitch Detection) ✅
+$$x$$
 
-[x] Implement YIN steps (Difference function, CMNDF, Absolute threshold, Parabolic interpolation).
+ MidiEventGenerator (State machine, debouncing, pitch bend math).
 
-[x] Ensure the algorithm operates safely on overlapping windows with dynamic $\tau$ limits.
+$$x$$
 
-Phase 4: MIDI State Machine & Output ✅
+ Custom GUI (FIFO Waveform, Gate Line, Note HUD).
 
-[x] Implement the MidiEventGenerator observing the strict State Machine (Silence, Attack, Sustain, Release) and debounce logic.
+$$x$$
 
-[x] Map cents deviations to precise 14-bit Pitch Bend output and output Legato transitions.
+ Noise rejection, Median Filtering, and Scale Quantization.
 
-Phase 5: Custom GUI & Visual Feedback ✅
+Phase 8: Expressive Control (Vowels to MIDI CC) ✅
 
-[x] Audio-to-UI Lock-free FIFO: Implement a downsampler inside processBlock to send small packages of downsampled audio samples to the Editor via juce::AbstractFifo without locking.
+$$x$$
 
-[x] Waveform & Gate Component: Design a custom Component that paints the real-time scrolling waveform with an overlay of the gate_threshold as a draggable line.
+ Integrate juce::dsp::FFT into a new SpectralAnalyzer class.
 
-[x] Active Note Display & Cent Needle: Build a prominent visual HUD displaying the current note string and a cent deviation tuning needle linked directly to the detected Pitch Bend state.
+$$x$$
 
-Phase 6: Pitch Refinement & Noise Filtering ✅
+ Implement strictly lock-free math to compute the Spectral Centroid in real-time.
 
-[x] Median Filter Implementation: Integrate a 3-tap or 5-tap running MedianFilter before sending pitch values to the state machine to reject momentary octave jumps.
+$$x$$
 
-[x] Zero-Crossing Rate (ZCR) Discriminator: Calculate ZCR inside processBlock. If the threshold flags unvoiced white noise (high ZCR indicative of sibilants like "S"), immediately force the MIDI state machine to bypass YIN.
+ Update MidiEventGenerator to output MIDI CC messages in the SUSTAIN state based on centroid fluctuations, mapped to the expression_cc parameter.
 
-Phase 7: Compositional & Expressive Control [CURRENT]
+$$x$$
 
-[ ] Scale Quantizer logic: Integrate scale snapping using the scale_root and scale_type parameters to restrict Note On outputs to specified musical grids.
+ Add a TimbreMeter component to the UI for visual feedback of the vowel shape.
 
-[ ] Pitch Bend Smoother: Implement a time-coefficient-based glide (pitch_bend_glide) to smooth out continuous pitch wheel messages, preventing jittery synthesizer transitions.
+Phase 9: Percussion Engine (Beatbox to Drums) 
+
+$$CURRENT$$
+
+$$$$
+
+ Implement an OnsetDetector that operates in parallel to the Pitch Detector, reacting in $< 2\text{ ms}$ using energy derivatives.
+
+$$$$
+
+ Implement a DrumClassifier to quickly categorize the transient (Kick, Snare, Hi-Hat) using basic ZCR and frequency band energy.
+
+$$$$
+
+ Update VoiceToMidiProcessor to route drum events strictly to MIDI Channel 10 when tracking_mode allows it.
 
 7. MATHEMATICAL FORMULAS REFERENCE
 
-Hz to MIDI Note:
-
+Hz to MIDI Note & Pitch Bend:
 
 $$exactMidi = 69.0f + 12.0f \times \log_2\left(\frac{frequency}{440.0f}\right)$$
 
-Nearest MIDI Note:
-
-
 $$noteNumber = \text{round}(exactMidi)$$
-
-Pitch Bend Calculation:
-
 
 $$cents = (exactMidi - noteNumber) \times 100.0f$$
 
+$$PitchBend = 8192 + \left(\frac{cents}{100.0f \times pitch\_bend\_range}\right) \times 8192$$
 
-Map $cents$ based on the user's pitch_bend_range parameter to the 14-bit MIDI range ($0$ to $16383$, center $8192$):
+(Note on MIDI standard constraints: The value 8192 represents the absolute dead-center of the 14-bit MIDI pitch bend protocol, which strictly operates within a bounded range of 0 to 16383. The pitch_bend_range APVTS variable acts as a vital scaling factor and must mirror the external synthesizer's configured bend range (e.g., $\pm 2$ or $\pm 12$ semitones) to ensure accurate intonation. For instance, a $+50$ cent vocal drift with a 2-semitone range yields a MIDI value of $10240$. In the C++ implementation, this final calculated value must always be clamped via juce::jlimit(0, 16383, PitchBend) before being dispatched to the juce::MidiBuffer to prevent out-of-bounds MIDI errors during extreme vocal glissandos.)
 
+Spectral Centroid (Timbre/Vowel):
 
-$$PitchBendValue = 8192 + \left(\frac{cents}{100.0f \times pitch\_bend\_range}\right) \times 8192$$
+$$Centroid = \frac{\sum_{n=0}^{N-1} f(n) \cdot x(n)}{\sum_{n=0}^{N-1} x(n)}$$
+
+(Where $f(n)$ is the center frequency of the bin and $x(n)$ is the magnitude).
+
+Energy Derivative (Onset Detection):
+
+$$E_{current} = \frac{1}{N} \sum_{n=0}^{N-1} x^2(n)$$
+
+$$E_{diff} = E_{current} - E_{previous}$$
+
+(Trigger beatbox event if $E_{diff} > Threshold$).

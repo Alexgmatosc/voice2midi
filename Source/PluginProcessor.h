@@ -8,6 +8,7 @@
 #include "UI/AudioVisualFifo.h"
 #include "DSP/MedianFilter.h"
 #include "DSP/NoiseRejecter.h"
+#include "DSP/SpectralAnalyzer.h"
 
 class VoiceToMidiProcessor : public juce::AudioProcessor
 {
@@ -46,6 +47,7 @@ public:
     float getCurrentLevelDb() const { return currentLevelDb.load(); }
     float getCurrentPitchHz() const { return currentPitchHz.load(); }
     int getCurrentPlayingNote() const { return currentPlayingNote.load(); }
+    float getCurrentCentroid() const { return currentCentroid.load(); }
     v2m::AudioVisualFifo& getVisualFifo() { return visualFifo; }
 
 private:
@@ -61,6 +63,8 @@ private:
     std::atomic<float>* scaleRootParameter = nullptr;
     std::atomic<float>* scaleTypeParameter = nullptr;
     std::atomic<float>* pitchBendGlideParameter = nullptr;
+    std::atomic<float>* trackingModeParameter = nullptr;
+    std::atomic<float>* expressionCCParameter = nullptr;
 
     v2m::CircularBuffer circularBuffer;
     v2m::EnvelopeFollower envelopeFollower;
@@ -68,10 +72,12 @@ private:
     v2m::MidiEventGenerator midiGenerator;
     v2m::MedianFilter medianFilter;
     v2m::NoiseRejecter noiseRejecter;
+    v2m::SpectralAnalyzer spectralAnalyzer;
 
     std::atomic<float> currentLevelDb { -100.0f };
     std::atomic<float> currentPitchHz { -1.0f };
     std::atomic<int> currentPlayingNote { -1 };
+    std::atomic<float> currentCentroid { 0.0f };
 
     v2m::AudioVisualFifo visualFifo;
     int downsampleCounter = 0;

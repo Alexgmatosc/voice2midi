@@ -8,6 +8,7 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
     addAndMakeVisible(genericEditor);
     addAndMakeVisible(visualizer);
     addAndMakeVisible(hud);
+    addAndMakeVisible(timbreMeter);
     
     // Increased size to accommodate HUD, Waveform and the new scale/glide parameters
     setSize (450, 530);
@@ -29,8 +30,10 @@ void PluginEditor::resized()
 {
     auto area = getLocalBounds();
     
-    // 1. Place HUD display at the top (80px height)
-    hud.setBounds(area.removeFromTop(80).reduced(10));
+    // 1. Place HUD display at the top (80px height) next to TimbreMeter
+    auto topArea = area.removeFromTop(80).reduced(10);
+    timbreMeter.setBounds(topArea.removeFromRight(40));
+    hud.setBounds(topArea.reduced(2));
     
     // 2. Place Waveform visualizer in the middle (120px height)
     visualizer.setBounds(area.removeFromTop(120).reduced(10));
@@ -54,10 +57,12 @@ void PluginEditor::timerCallback()
         }
     }
     
-    // 2. Poll notes and pitch from the audio processor
+    // 2. Poll notes, pitch, and spectral centroid from the audio processor
     int playingNote = audioProcessor.getCurrentPlayingNote();
     float pitchHz = audioProcessor.getCurrentPitchHz();
+    float centroid = audioProcessor.getCurrentCentroid();
     
-    // 3. Update HUD states
+    // 3. Update HUD and TimbreMeter states
     hud.updateState(playingNote, pitchHz);
+    timbreMeter.setCentroidValue(centroid);
 }

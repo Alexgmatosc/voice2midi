@@ -22,7 +22,9 @@ public:
 
     // Processes the state machine and injects MIDI events into the buffer.
     void processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
-                      int scaleRoot, int scaleType, float glideMs, int numSamples, juce::MidiBuffer& midiMessages);
+                      int scaleRoot, int scaleType, float glideMs,
+                      float normalizedCentroid, int targetCC,
+                      int numSamples, juce::MidiBuffer& midiMessages);
 
     void reset();
 
@@ -38,6 +40,7 @@ private:
     int currentlyPlayingNote = -1;
     float stableFreqHz = 0.0f;
     float smoothedPitchBend = 8192.0f; // 14-bit center value
+    int lastSentCCValue = -1;
 
     ScaleQuantizer scaleQuantizer;
     

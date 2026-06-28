@@ -4,6 +4,7 @@
 #include "PluginProcessor.h"
 #include "UI/WaveformVisualizer.h"
 #include "UI/HUDDisplay.h"
+#include "UI/TimbreMeter.h"
 
 class PluginEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -21,6 +22,7 @@ private:
     
     v2m::WaveformVisualizer visualizer;
     v2m::HUDDisplay hud;
+    v2m::TimbreMeter timbreMeter;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };
