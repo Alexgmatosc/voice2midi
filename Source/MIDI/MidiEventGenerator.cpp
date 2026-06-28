@@ -18,6 +18,7 @@ void MidiEventGenerator::reset()
     samplesSinceAttack = 0;
     currentlyPlayingNote = -1;
     stableFreqHz = 0.0f;
+    smoothedPitchBend = 8192.0f;
 }
 
 float MidiEventGenerator::hzToMidi(float hz) const
@@ -26,7 +27,8 @@ float MidiEventGenerator::hzToMidi(float hz) const
     return 69.0f + 12.0f * std::log2(hz / 440.0f);
 }
 
-void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi, int numSamples, juce::MidiBuffer& midiMessages)
+void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
+                                      int scaleRoot, int scaleType, float glideMs, int numSamples, juce::MidiBuffer& midiMessages)
 {
     // State transitions based on Gate
     if (!isGateOpen)
@@ -47,7 +49,6 @@ void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, flo
     }
     
     // We add all events at the beginning of the block (sample offset 0) for simplicity.
-    // In a hyper-accurate system, we could interpolate the exact sample of attack.
     int sampleOffset = 0;
     
     switch (currentState)
@@ -71,10 +72,14 @@ void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, flo
                 if (samplesSinceAttack >= debounceSamples)
                 {
                     currentState = State::Sustain;
-                    currentlyPlayingNote = juce::roundToInt(hzToMidi(stableFreqHz));
-                    juce::uint8 velocity = static_cast<juce::uint8>(juce::jlimit(1, 127, static_cast<int>(velocityLinear * 127.0f)));
+                    int rawNote = juce::roundToInt(hzToMidi(stableFreqHz));
+                    // Snap the new note to the selected musical scale
+                    currentlyPlayingNote = scaleQuantizer.quantize(rawNote, scaleRoot, scaleType);
                     
+                    juce::uint8 velocity = static_cast<juce::uint8>(juce::jlimit(1, 127, static_cast<int>(velocityLinear * 127.0f)));
                     midiMessages.addEvent(juce::MidiMessage::noteOn(1, currentlyPlayingNote, velocity), sampleOffset);
+                    
+                    smoothedPitchBend = 8192.0f; // Start at center
                 }
             }
             break;
@@ -83,26 +88,46 @@ void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, flo
             if (detectedFreqHz > 0.0f)
             {
                 float exactMidi = hzToMidi(detectedFreqHz);
-                float diffSemis = exactMidi - static_cast<float>(currentlyPlayingNote);
+                int rawTargetNote = juce::roundToInt(exactMidi);
+                // Get the quantized target note
+                int targetNote = scaleQuantizer.quantize(rawTargetNote, scaleRoot, scaleType);
                 
-                // If pitch drifts more than 1 semitone, trigger Legato Note On
-                if (std::abs(diffSemis) > 1.0f)
+                // If the quantized note changes, trigger Legato Note On/Off
+                if (targetNote != currentlyPlayingNote)
                 {
                     midiMessages.addEvent(juce::MidiMessage::noteOff(1, currentlyPlayingNote), sampleOffset);
                     
-                    currentlyPlayingNote = juce::roundToInt(exactMidi);
+                    currentlyPlayingNote = targetNote;
                     juce::uint8 velocity = static_cast<juce::uint8>(juce::jlimit(1, 127, static_cast<int>(velocityLinear * 127.0f)));
                     
                     midiMessages.addEvent(juce::MidiMessage::noteOn(1, currentlyPlayingNote, velocity), sampleOffset);
-                    midiMessages.addEvent(juce::MidiMessage::pitchWheel(1, 8192), sampleOffset); // Reset bend
+                    smoothedPitchBend = 8192.0f; // Reset bend
+                    midiMessages.addEvent(juce::MidiMessage::pitchWheel(1, static_cast<int>(smoothedPitchBend)), sampleOffset);
                 }
                 else
                 {
-                    // Pitch Bend calculation (14-bit MIDI: 0 to 16383, center 8192)
+                    // Pitch Bend calculation relative to the currently playing (quantized) note
+                    float diffSemis = exactMidi - static_cast<float>(currentlyPlayingNote);
                     float bendNormalized = diffSemis / static_cast<float>(pitchBendRangeSemi);
                     bendNormalized = juce::jlimit(-1.0f, 1.0f, bendNormalized);
-                    int bendValue = 8192 + static_cast<int>(bendNormalized * 8191.0f);
-                    midiMessages.addEvent(juce::MidiMessage::pitchWheel(1, bendValue), sampleOffset);
+                    float targetPitchBend = 8192.0f + (bendNormalized * 8191.0f);
+                    
+                    // Temporal smoothing (glide LPF filter)
+                    if (glideMs > 0.0f)
+                    {
+                        float blockTimeSec = static_cast<float>(numSamples) / static_cast<float>(currentSampleRate);
+                        float glideSec = glideMs / 1000.0f;
+                        float alpha = std::exp(-blockTimeSec / glideSec);
+                        
+                        smoothedPitchBend = alpha * smoothedPitchBend + (1.0f - alpha) * targetPitchBend;
+                    }
+                    else
+                    {
+                        smoothedPitchBend = targetPitchBend;
+                    }
+                    
+                    int finalBendValue = juce::jlimit(0, 16383, static_cast<int>(std::round(smoothedPitchBend)));
+                    midiMessages.addEvent(juce::MidiMessage::pitchWheel(1, finalBendValue), sampleOffset);
                 }
             }
             break;
@@ -112,6 +137,7 @@ void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, flo
             {
                 midiMessages.addEvent(juce::MidiMessage::noteOff(1, currentlyPlayingNote), sampleOffset);
                 currentlyPlayingNote = -1;
+                smoothedPitchBend = 8192.0f;
                 midiMessages.addEvent(juce::MidiMessage::pitchWheel(1, 8192), sampleOffset); // Reset bend
             }
             currentState = State::Silence;

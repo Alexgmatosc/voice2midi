@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../DSP/ScaleQuantizer.h"
 
 namespace v2m
 {
@@ -20,10 +21,12 @@ public:
     void prepare(double sampleRate);
 
     // Processes the state machine and injects MIDI events into the buffer.
-    // Should be called once per audio block to minimize MIDI jitter and CPU load.
-    void processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi, int numSamples, juce::MidiBuffer& midiMessages);
+    void processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
+                      int scaleRoot, int scaleType, float glideMs, int numSamples, juce::MidiBuffer& midiMessages);
 
     void reset();
+
+    int getCurrentlyPlayingNote() const { return currentlyPlayingNote; }
 
 private:
     double currentSampleRate = 44100.0;
@@ -34,6 +37,9 @@ private:
 
     int currentlyPlayingNote = -1;
     float stableFreqHz = 0.0f;
+    float smoothedPitchBend = 8192.0f; // 14-bit center value
+
+    ScaleQuantizer scaleQuantizer;
     
     float hzToMidi(float hz) const;
 };

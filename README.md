@@ -1,60 +1,90 @@
 # Voice2MIDI
 
-Voice2MIDI es un conversor en tiempo real de voz a MIDI de baja latencia. Captura el audio monofónico de tu micrófono, analiza la frecuencia y la amplitud de tu voz mediante el algoritmo YIN y genera eventos MIDI (Note On, Note Off, Velocity y Pitch Bend) para tocar sintetizadores o instrumentos virtuales en tiempo real.
+Voice2MIDI is a real-time, low-latency, monophonic voice-to-MIDI converter. It captures mono audio from your microphone, analyzes pitch and amplitude in real time using the YIN pitch detection algorithm, and translates vocal input into standard MIDI messages (Note On, Note Off, Velocity, and Pitch Bend).
+
+It compiles as a **Standalone Application**, **VST3 plugin**, and **AU plugin** (on macOS), enabling you to control software synthesizers or virtual instruments using your voice.
 
 ---
 
-## 1. Guía Rápida de Ajuste de Parámetros
+## Features
 
-La interfaz genérica muestra 5 deslizadores (*sliders*). Ajustarlos correctamente es la diferencia entre una detección limpia y un caos de notas falsas:
-
-### 1. Input Gain (Ganancia de Entrada)
-* **Rango:** `-20 dB` a `+20 dB` (Por defecto: `0 dB`)
-* **Qué hace:** Sube o baja el volumen del micrófono *antes* de que pase por el detector.
-* **Cómo usarlo:** Si tu micrófono de por sí graba muy bajo, súbelo. En el monitor de depuración visual de la parte superior, busca que tu voz al hablar de forma normal marque entre `-15 dB` y `-5 dB`. Evita subirlo tanto que marque `0 dB` (distorsión/clipping).
-
-### 2. Gate Threshold (Umbral de Puerta de Ruido)
-* **Rango:** `-60 dB` a `-5 dB` (Por defecto: `-30 dB`)
-* **Qué hace:** Es el filtro que separa el ruido de la habitación de tu canto. Si el volumen detectado es menor que este umbral, el programa no enviará ninguna nota MIDI.
-* **Cómo usarlo:** 
-  1. Quédate en absoluto silencio y mira el monitor visual de nivel de entrada (ej: marcará `-45 dB`).
-  2. Ajusta el deslizador de **Gate Threshold** ligeramente por encima de ese número (ej: `-35 dB`).
-  3. Ahora, cuando estés en silencio, la barra superior estará en **Cian** (puerta cerrada). Cuando cantes, superará el umbral y cambiará a **Verde** (puerta abierta, enviando notas).
-
-### 3. Pitch Bend Range (Rango de Curvatura de Tono)
-* **Opciones:** `1`, `2`, `12` o `24` semitonos (Por defecto: `2`)
-* **Qué hace:** Define la sensibilidad al deslizar la voz. Si cantas una nota y haces un *portamento* (deslizamiento) o un vibrato suave, la app no disparará notas nuevas. En su lugar, envía comandos de *Pitch Bend* (curvatura de tono de 14 bits) para que el sintetizador imite tu deslizamiento.
-* **Cómo usarlo:** **¡MUY IMPORTANTE!** El valor que elijas aquí debe coincidir exactamente con el rango de Pitch Bend configurado en tu sintetizador en GarageBand/DAW. Si en Voice2MIDI pones `2` y tu sintetizador en GarageBand está configurado en `2`, tu deslizamiento de voz sonará perfectamente afinado. Si no coinciden, sonará desafinado.
-
-### 4. Min Frequency (Frecuencia Mínima)
-* **Rango:** `20 Hz` a `500 Hz` (Por defecto: `80 Hz`)
-* **Qué hace:** El límite más bajo donde el algoritmo buscará notas.
-* **Cómo usarlo:** Limita las frecuencias graves para evitar que ruidos como golpes en el soporte del micrófono, viento o ruidos de baja frecuencia se interpreten como notas MIDI súper graves. Si eres tenor o soprano, puedes subir este valor con seguridad (ej: `100 Hz` o `120 Hz`). Esto además reduce el consumo de CPU.
-
-### 5. Max Frequency (Frecuencia Máxima)
-* **Rango:** `400 Hz` a `4000 Hz` (Por defecto: `1000 Hz`)
-* **Qué hace:** El límite más alto donde el algoritmo buscará notas.
-* **Cómo usarlo:** Limita las frecuencias agudas para evitar que los siseos de la boca (sonidos como "S", "T"), chasquidos o respiraciones fuertes se interpreten como notas MIDI súper agudas. Para la mayoría de voces humanas, `1000 Hz` o `1500 Hz` es más que suficiente (la nota Do más alta de una soprano ronda los 1046 Hz). Acotar esto ahorra mucha CPU.
+- **YIN Pitch Detection:** High-accuracy monophonic pitch tracker operating in real time.
+- **Visual Feedback HUD:** Displays the current active note and a fine-tuning needle showing cents deviation (-50 to +50 cents).
+- **Interactive Waveform Visualizer:** Shows incoming audio with a draggable gate threshold line.
+- **Sibilant Rejection (ZCR):** Analyzes the Zero-Crossing Rate (ZCR) to automatically detect unvoiced consonants (like "S", "T", "SH") and bypass pitch detection, preventing accidental notes.
+- **Glitch Filtering (Median Filter):** Multi-tap running median filter to eliminate octave-doubling errors and transient pitch spikes.
+- **Scale Quantization:** Snaps detected notes to musical grids (Chromatic, Major, Minor, Pentatonic) in any key.
+- **Pitch Bend Smoother (Glide):** Adjustable low-pass filter ($0.0$ to $200.0$ ms) to smooth out pitch-bend data for continuous glides without stepping.
 
 ---
 
-## 2. ¿Cómo probarlo con GarageBand? (Mac)
+## Parameter Settings Guide
 
-Debido a que GarageBand no permite enrutar MIDI entre plugins, utilizaremos la aplicación **Standalone** junto con el cable virtual nativo de Mac:
+The parameter panel at the bottom of the interface lets you tune the tracking behavior:
 
-### Configurar el cable MIDI virtual en tu Mac:
-1. Abre la aplicación **Configuración de Audio MIDI** (búscala con Spotlight `Cmd + Espacio`).
-2. En el menú superior, haz clic en **Ventana** -> **Mostrar estudio MIDI**.
-3. Haz doble clic en el dispositivo rojo llamado **Controlador IAC** (IAC Driver).
-4. Marca la casilla **"El dispositivo está conectado"** y cierra la ventana.
+### 1. Input Gain (dB)
+* **Range:** `-24.0 dB` to `+24.0 dB` (Default: `0.0 dB`)
+* **Purpose:** Boosts or attenuates microphone input before pitch analysis. Aim for vocal peaks between `-15 dB` and `-5 dB` on the waveform visualizer.
 
-### Conectar los programas:
-1. Abre `voice2midi.app`.
-2. Ve a **Options** -> **Audio/MIDI Settings**:
-   - **Input:** Selecciona tu micrófono (ej. `USB Audio CODEC`).
-   - **MIDI Output:** Selecciona **"Bus del controlador IAC"** (o **"GarageBand virtual de entrada"** si ya abriste GarageBand).
-3. Abre **GarageBand**, crea una pista de **Instrumento de Software** (un piano, sintetizador, etc.) y selecciónala.
-4. Canta. El sintetizador de GarageBand sonará respondiendo a tu voz. 
+### 2. Gate Threshold (dB)
+* **Range:** `-60.0 dB` to `0.0 dB` (Default: `-40.0 dB`)
+* **Purpose:** Separates background noise from vocal performance. No MIDI messages are sent if the signal amplitude falls below this threshold. You can also drag the horizontal line on the waveform to update this.
 
-> [!TIP]
-> **Consejo para evitar latencia:** En la configuración de audio de Voice2MIDI, mantén el **Audio buffer size** lo más bajo posible (ej: `128 samples` o `256 samples`) para que el tiempo entre tu canto y el sonido del sintetizador sea imperceptible. Si escuchas chasquidos en el audio, sube el buffer un escalón.
+### 3. Pitch Bend Range (Semitones)
+* **Options:** `1`, `2`, `12`, `24` semitones (Default: `2`)
+* **Purpose:** Sets the maximum range of pitch bend messages. **Important:** Match this setting with your target synthesizer's pitch bend range to ensure accurate glides.
+
+### 4. Min / Max Frequency (Hz)
+* **Min Range:** `40.0 Hz` to `200.0 Hz` (Default: `65.0 Hz`)
+* **Max Range:** `300.0 Hz` to `2000.0 Hz` (Default: `1000.0 Hz`)
+* **Purpose:** Limits the search window of the YIN algorithm. Restricting this range saves CPU and prevents low-frequency rumble or high-frequency breath sounds from triggering fake notes.
+
+### 5. Scale Root & Scale Type
+* **Scale Root:** Choice from C to B.
+* **Scale Type:** Chromatic (no snapping), Major, Minor, or Pentatonic.
+* **Purpose:** Snaps detected notes to a musical grid. Cents deviation (for vibrato) is calculated relative to the scale-quantized note.
+
+### 6. Pitch Bend Glide (ms)
+* **Range:** `0.0 ms` to `200.0 ms` (Default: `0.0 ms`)
+* **Purpose:** Smooths pitch bend transitions over time using a one-pole filter. Higher values create a sliding portamento effect and reject vocal jitter.
+
+---
+
+## Building and Installation
+
+### Prerequisites
+- CMake (version 3.15 or higher)
+- A C++20 compatible compiler (Clang, GCC, or MSVC)
+- macOS (for AU and standalone mic permission configuration) or Windows/Linux
+
+### Compiling
+To build all formats (Standalone, VST3, AU) in release mode, run the build script in the project root:
+
+```bash
+chmod +x build.sh
+./build.sh
+```
+
+Compiled binaries will be written to:
+`build/voice2midi_artefacts/Release/`
+
+---
+
+## DAW Setup & Routing (Mac/GarageBand)
+
+DAWs like GarageBand do not support routing MIDI outputs from plugins natively. To route MIDI from the **Standalone** target:
+
+1. **Enable macOS IAC Driver:**
+   - Open **Audio MIDI Setup** on your Mac.
+   - Go to **Window** -> **Show MIDI Studio**.
+   - Double-click **IAC Driver**, check **"Device is online"**, and click apply.
+2. **Configure Voice2MIDI Standalone:**
+   - Open `voice2midi.app`.
+   - Go to **Options** -> **Audio/MIDI Settings**.
+   - Set **Input** to your microphone.
+   - Set **Active MIDI Outputs** to **IAC Driver Bus 1**.
+   - Keep the **Audio buffer size** as low as possible (e.g., `128` or `256` samples) to minimize latency.
+3. **Configure DAW:**
+   - Open GarageBand / Logic / Reaper.
+   - Create a software instrument track.
+   - The DAW will automatically listen to incoming MIDI from the IAC Driver bus, and you can play the virtual instrument with your voice!

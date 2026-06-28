@@ -5,6 +5,9 @@
 #include "DSP/EnvelopeFollower.h"
 #include "DSP/YinPitchDetector.h"
 #include "MIDI/MidiEventGenerator.h"
+#include "UI/AudioVisualFifo.h"
+#include "DSP/MedianFilter.h"
+#include "DSP/NoiseRejecter.h"
 
 class VoiceToMidiProcessor : public juce::AudioProcessor
 {
@@ -42,6 +45,8 @@ public:
 
     float getCurrentLevelDb() const { return currentLevelDb.load(); }
     float getCurrentPitchHz() const { return currentPitchHz.load(); }
+    int getCurrentPlayingNote() const { return currentPlayingNote.load(); }
+    v2m::AudioVisualFifo& getVisualFifo() { return visualFifo; }
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -53,14 +58,24 @@ private:
     std::atomic<float>* pitchBendRangeParameter = nullptr;
     std::atomic<float>* minFreqParameter = nullptr;
     std::atomic<float>* maxFreqParameter = nullptr;
+    std::atomic<float>* scaleRootParameter = nullptr;
+    std::atomic<float>* scaleTypeParameter = nullptr;
+    std::atomic<float>* pitchBendGlideParameter = nullptr;
 
     v2m::CircularBuffer circularBuffer;
     v2m::EnvelopeFollower envelopeFollower;
     v2m::YinPitchDetector pitchDetector;
     v2m::MidiEventGenerator midiGenerator;
+    v2m::MedianFilter medianFilter;
+    v2m::NoiseRejecter noiseRejecter;
 
     std::atomic<float> currentLevelDb { -100.0f };
     std::atomic<float> currentPitchHz { -1.0f };
+    std::atomic<int> currentPlayingNote { -1 };
+
+    v2m::AudioVisualFifo visualFifo;
+    int downsampleCounter = 0;
+    float maxPeakThisWindow = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VoiceToMidiProcessor)
 };

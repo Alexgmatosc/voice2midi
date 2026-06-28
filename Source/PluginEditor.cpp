@@ -2,22 +2,17 @@
 #include "PluginEditor.h"
 
 PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p), genericEditor(p)
+    : AudioProcessorEditor (&p), audioProcessor (p), genericEditor(p),
+      visualizer (p.getAPVTS())
 {
     addAndMakeVisible(genericEditor);
+    addAndMakeVisible(visualizer);
+    addAndMakeVisible(hud);
     
-    // Setup the monitor label
-    addAndMakeVisible(monitorLabel);
-    monitorLabel.setJustificationType(juce::Justification::centred);
-    monitorLabel.setFont(juce::Font(juce::FontOptions().withHeight(16.0f).withStyle("Bold")));
-    monitorLabel.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.4f));
-    monitorLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
-    monitorLabel.setText("Audio Monitor - Esperando Señal...", juce::dontSendNotification);
-
-    // Set height to accommodate the generic editor plus the monitor bar
-    setSize (400, 360);
+    // Increased size to accommodate HUD, Waveform and the new scale/glide parameters
+    setSize (450, 530);
     
-    startTimerHz(30); // 30 FPS updates
+    startTimerHz(60); // 60 FPS for smooth waveform updates
 }
 
 PluginEditor::~PluginEditor()
@@ -34,37 +29,35 @@ void PluginEditor::resized()
 {
     auto area = getLocalBounds();
     
-    // Place the monitor label at the top
-    monitorLabel.setBounds(area.removeFromTop(60).reduced(10));
+    // 1. Place HUD display at the top (80px height)
+    hud.setBounds(area.removeFromTop(80).reduced(10));
     
-    // The generic editor takes the remaining space
+    // 2. Place Waveform visualizer in the middle (120px height)
+    visualizer.setBounds(area.removeFromTop(120).reduced(10));
+    
+    // 3. The generic editor takes the remaining space at the bottom for parameter sliders
     genericEditor.setBounds(area);
 }
 
 void PluginEditor::timerCallback()
 {
-    float db = audioProcessor.getCurrentLevelDb();
-    float pitch = audioProcessor.getCurrentPitchHz();
-    
-    juce::String pitchText = (pitch > 0.0f) ? juce::String(pitch, 1) + " Hz" : "No detectado";
-    
-    juce::String text = juce::String::formatted(
-        "Nivel de Entrada: %.1f dB   |   Pitch: %s",
-        db,
-        pitchText.toRawUTF8()
-    );
-    
-    // Change color based on gate status
-    auto gateParam = audioProcessor.getAPVTS().getRawParameterValue("gate_threshold");
-    float gateThreshold = (gateParam != nullptr) ? gateParam->load() : -30.0f;
-    if (db > gateThreshold)
+    // 1. Pull downsampled audio from the processor FIFO and push to the visualizer
+    auto& fifo = audioProcessor.getVisualFifo();
+    int available = fifo.getNumAvailable();
+    if (available > 0)
     {
-        monitorLabel.setColour(juce::Label::textColourId, juce::Colours::lightgreen);
-    }
-    else
-    {
-        monitorLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
+        std::vector<float> tempBuffer(static_cast<size_t>(available));
+        int readCount = fifo.read(tempBuffer.data(), available);
+        if (readCount > 0)
+        {
+            visualizer.pushSamples(tempBuffer.data(), readCount);
+        }
     }
     
-    monitorLabel.setText(text, juce::dontSendNotification);
+    // 2. Poll notes and pitch from the audio processor
+    int playingNote = audioProcessor.getCurrentPlayingNote();
+    float pitchHz = audioProcessor.getCurrentPitchHz();
+    
+    // 3. Update HUD states
+    hud.updateState(playingNote, pitchHz);
 }

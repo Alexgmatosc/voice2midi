@@ -42,6 +42,8 @@ target_sources(voice2midi PRIVATE
     Source/PluginEditor.cpp
     Source/DSP/YinPitchDetector.cpp
     Source/MIDI/MidiEventGenerator.cpp
+    Source/UI/WaveformVisualizer.cpp
+    Source/UI/HUDDisplay.cpp
 )
 
 # Include directories
