@@ -156,6 +156,10 @@ void VoiceToMidiProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
         drum.noteNumber = -1;
         drum.samplesRemaining = 0;
     }
+
+    // Pre-allocate thread-safe window buffers
+    yinWindowBuffer.resize(2048, 0.0f);
+    fftWindowBuffer.resize(1024, 0.0f);
 }
 
 void VoiceToMidiProcessor::releaseResources()
@@ -218,7 +222,6 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     float currentDb = envelopeFollower.getCurrentEnvelopeDb();
-    bool isGateOpen = (currentDb > gateThreshold);
 
     int trackingMode = static_cast<int>(*trackingModeParameter);
     bool runMelody = (trackingMode == 0 || trackingMode == 2);
@@ -270,28 +273,28 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     // 3. Sibilant Rejection for Melody tracking (bypassed in beatbox-only mode)
-    bool gateOpenForMelody = isGateOpen && runMelody;
-    if (runMelody)
+    bool wasGateOpen = (midiGenerator.getCurrentlyPlayingNote() != -1);
+    bool isGateOpen = wasGateOpen ? (currentDb > (gateThreshold - 3.0f)) : (currentDb > gateThreshold);
+    
+    bool isUnvoicedNoise = false;
+    if (runMelody && isGateOpen)
     {
-        bool isUnvoicedNoise = noiseRejecter.isUnvoiced(inData, buffer.getNumSamples(), 0.15f);
-        if (isUnvoicedNoise)
-        {
-            gateOpenForMelody = false;
-        }
+        isUnvoicedNoise = noiseRejecter.isUnvoiced(inData, buffer.getNumSamples(), 0.15f);
     }
+    
+    bool gateOpenForMelody = isGateOpen && runMelody && !isUnvoicedNoise;
 
     // 4. Melody Pitch Tracker (YIN)
     float detectedPitchHz = -1.0f;
     if (gateOpenForMelody)
     {
         // Read the most recent 2048 samples from the circular buffer
-        float window[2048];
-        circularBuffer.readRecent(window, 2048);
+        circularBuffer.readRecent(yinWindowBuffer.data(), 2048);
         
         float minFreq = *minFreqParameter;
         float maxFreq = *maxFreqParameter;
         
-        float rawPitch = pitchDetector.process(window, 2048, minFreq, maxFreq);
+        float rawPitch = pitchDetector.process(yinWindowBuffer.data(), 2048, minFreq, maxFreq);
         
         // Median filter only valid pitch estimates to reject transient glitches/octave jumps
         if (rawPitch > 0.0f)
@@ -310,9 +313,8 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     if (gateOpenForMelody)
     {
         // Read the most recent 1024 samples for spectral analysis
-        float fftWindow[1024];
-        circularBuffer.readRecent(fftWindow, 1024);
-        float centroidHz = spectralAnalyzer.calculateCentroid(fftWindow, getSampleRate());
+        circularBuffer.readRecent(fftWindowBuffer.data(), 1024);
+        float centroidHz = spectralAnalyzer.calculateCentroid(fftWindowBuffer.data(), getSampleRate());
         
         // Normalize the centroid: 300Hz (dark, Closed Vowel) to 2000Hz (bright, Open Vowel)
         normCentroid = (centroidHz - 300.0f) / (2000.0f - 300.0f);
@@ -335,7 +337,8 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     // We pass the linear amplitude to map to MIDI velocity
     float linearVel = envelopeFollower.getCurrentEnvelope();
     
-    midiGenerator.processBlock(gateOpenForMelody, detectedPitchHz, linearVel, bendRangeSemi,
+    bool bypassGate = !runMelody || isUnvoicedNoise;
+    midiGenerator.processBlock(currentDb, gateThreshold, bypassGate, detectedPitchHz, linearVel, bendRangeSemi,
                                scaleRoot, scaleType, glideMs,
                                normCentroid, targetCC,
                                buffer.getNumSamples(), midiMessages);

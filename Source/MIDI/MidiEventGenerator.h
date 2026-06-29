@@ -21,7 +21,8 @@ public:
     void prepare(double sampleRate);
 
     // Processes the state machine and injects MIDI events into the buffer.
-    void processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
+    void processBlock(float currentDb, float gateThreshold, bool bypassGate,
+                      float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
                       int scaleRoot, int scaleType, float glideMs,
                       float normalizedCentroid, int targetCC,
                       int numSamples, juce::MidiBuffer& midiMessages);

@@ -28,12 +28,26 @@ float MidiEventGenerator::hzToMidi(float hz) const
     return 69.0f + 12.0f * std::log2(hz / 440.0f);
 }
 
-void MidiEventGenerator::processBlock(bool isGateOpen, float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
+void MidiEventGenerator::processBlock(float currentDb, float gateThreshold, bool bypassGate,
+                                      float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
                                       int scaleRoot, int scaleType, float glideMs,
                                       float normalizedCentroid, int targetCC,
                                       int numSamples, juce::MidiBuffer& midiMessages)
 {
-    // State transitions based on Gate
+    // State transitions based on Gate with asymmetrical hysteresis
+    bool isGateOpen = false;
+    if (!bypassGate)
+    {
+        if (currentState == State::Silence || currentState == State::Release)
+        {
+            isGateOpen = (currentDb > gateThreshold);
+        }
+        else // Attack or Sustain
+        {
+            isGateOpen = (currentDb > (gateThreshold - 3.0f));
+        }
+    }
+
     if (!isGateOpen)
     {
         if (currentState == State::Attack || currentState == State::Sustain)

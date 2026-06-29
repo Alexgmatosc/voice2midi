@@ -26,11 +26,12 @@ float YinPitchDetector::process(const float* buffer, int bufferSize, float minFr
     
     if (minTau >= maxSearchTau) return -1.0f;
 
-    // Step 1 & 2: We calculate from tau=1 up to maxSearchTau.
-    // Technically YIN needs tau=0 to be 1 for CMNDF, but the math starts summing from tau=1
-    
-    difference(buffer, bufferSize, 1, maxSearchTau);
-    cumulativeMeanNormalizedDifference(1, maxSearchTau);
+    // Restrict YIN calculation to the vocal search range (plus 1 element boundaries for parabolic interpolation)
+    int searchMinTau = std::max(1, minTau - 1);
+    int searchMaxTau = std::min(static_cast<int>(yinBuffer.size()) - 1, maxSearchTau + 1);
+
+    difference(buffer, bufferSize, searchMinTau, searchMaxTau);
+    cumulativeMeanNormalizedDifference(searchMinTau, searchMaxTau);
     
     // Step 3: Absolute Threshold
     int tauEstimate = absoluteThreshold(minTau, maxSearchTau);
@@ -49,13 +50,10 @@ void YinPitchDetector::difference(const float* buffer, int bufferSize, int minTa
 {
     int windowSize = bufferSize / 2;
     
-    // Initialize yinBuffer to 0 for the range we are going to calculate
-    for (int tau = 1; tau <= maxTau; ++tau)
-    {
-        yinBuffer[tau] = 0.0f;
-    }
+    // Reset yinBuffer elements to 0
+    std::fill(yinBuffer.begin(), yinBuffer.end(), 0.0f);
 
-    for (int tau = 1; tau <= maxTau; ++tau)
+    for (int tau = minTau; tau <= maxTau; ++tau)
     {
         float delta = 0.0f;
         for (int i = 0; i < windowSize; ++i)
@@ -70,13 +68,18 @@ void YinPitchDetector::difference(const float* buffer, int bufferSize, int minTa
 void YinPitchDetector::cumulativeMeanNormalizedDifference(int minTau, int maxTau)
 {
     yinBuffer[0] = 1.0f;
-    float runningSum = 0.0f;
+    for (int tau = 1; tau < minTau; ++tau)
+    {
+        yinBuffer[tau] = 1.0f;
+    }
     
-    for (int tau = 1; tau <= maxTau; ++tau)
+    float runningSum = 0.0f;
+    for (int tau = minTau; tau <= maxTau; ++tau)
     {
         runningSum += yinBuffer[tau];
+        int numElements = tau - minTau + 1;
         if (runningSum > 0.0f)
-            yinBuffer[tau] = yinBuffer[tau] * tau / runningSum;
+            yinBuffer[tau] = yinBuffer[tau] * numElements / runningSum;
         else
             yinBuffer[tau] = 1.0f; // Handle exact zeros
     }

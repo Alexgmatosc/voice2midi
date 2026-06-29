@@ -85,6 +85,9 @@ private:
     };
     ActiveDrumNote activeDrumNotes[8] = {};
 
+    std::vector<float> yinWindowBuffer;
+    std::vector<float> fftWindowBuffer;
+
     std::atomic<float> currentLevelDb { -100.0f };
     std::atomic<float> currentPitchHz { -1.0f };
     std::atomic<int> currentPlayingNote { -1 };
