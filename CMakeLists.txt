@@ -41,6 +41,7 @@ target_sources(voice2midi PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/DSP/YinPitchDetector.cpp
+    Source/DSP/CalibrationManager.cpp
     Source/MIDI/MidiEventGenerator.cpp
     Source/UI/WaveformVisualizer.cpp
     Source/UI/HUDDisplay.cpp
