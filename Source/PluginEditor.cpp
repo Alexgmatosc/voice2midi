@@ -2,10 +2,11 @@
 #include "PluginEditor.h"
 
 PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p), genericEditor(p),
+    : AudioProcessorEditor (&p), audioProcessor (p),
       visualizer (p.getAPVTS())
 {
-    addAndMakeVisible(genericEditor);
+    setLookAndFeel(&customLookAndFeel);
+
     addAndMakeVisible(visualizer);
     addAndMakeVisible(hud);
     addAndMakeVisible(timbreMeter);
@@ -18,9 +19,48 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
     addAndMakeVisible(calibrationLabel);
     calibrationLabel.setJustificationType(juce::Justification::centred);
     calibrationLabel.setColour(juce::Label::textColourId, juce::Colours::yellow);
-    
-    // Increased size to accommodate HUD, Waveform, Calibrator, and 12 parameter sliders
-    setSize (450, 750);
+
+    auto setupSlider = [this, &p](juce::Slider& s, juce::Label& l, const juce::String& text, const juce::String& paramId, std::unique_ptr<SliderAttachment>& attach) {
+        s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+        addAndMakeVisible(s);
+        
+        l.setText(text, juce::dontSendNotification);
+        l.setJustificationType(juce::Justification::centred);
+        l.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.7f));
+        l.setFont(14.0f);
+        addAndMakeVisible(l);
+        
+        attach = std::make_unique<SliderAttachment>(p.getAPVTS(), paramId, s);
+    };
+
+    auto setupCombo = [this, &p](juce::ComboBox& c, juce::Label& l, const juce::String& text, const juce::String& paramId, std::unique_ptr<ComboBoxAttachment>& attach) {
+        addAndMakeVisible(c);
+        
+        l.setText(text, juce::dontSendNotification);
+        l.setJustificationType(juce::Justification::centred);
+        l.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.7f));
+        l.setFont(14.0f);
+        addAndMakeVisible(l);
+        
+        attach = std::make_unique<ComboBoxAttachment>(p.getAPVTS(), paramId, c);
+    };
+
+    setupSlider(inputGainSlider, inputGainLabel, "Gain", "input_gain", inputGainAttachment);
+    setupSlider(gateThresholdSlider, gateThresholdLabel, "Gate", "gate_threshold", gateThresholdAttachment);
+    setupSlider(minFreqSlider, minFreqLabel, "Min Freq", "min_freq", minFreqAttachment);
+    setupSlider(maxFreqSlider, maxFreqLabel, "Max Freq", "max_freq", maxFreqAttachment);
+    setupSlider(pitchBendGlideSlider, pitchBendGlideLabel, "Glide", "pitch_bend_glide", pitchBendGlideAttachment);
+    setupSlider(intellibendStickinessSlider, intellibendStickinessLabel, "Stickiness", "intellibend_stickiness", intellibendStickinessAttachment);
+
+    setupCombo(pitchBendRangeBox, pitchBendRangeLabel, "PB Range", "pitch_bend_range", pitchBendRangeAttachment);
+    setupCombo(scaleRootBox, scaleRootLabel, "Root", "scale_root", scaleRootAttachment);
+    setupCombo(scaleTypeBox, scaleTypeLabel, "Scale", "scale_type", scaleTypeAttachment);
+    setupCombo(trackingModeBox, trackingModeLabel, "Tracking", "tracking_mode", trackingModeAttachment);
+    setupCombo(expressionCCBox, expressionCCLabel, "Express CC", "expression_cc", expressionCCAttachment);
+    setupCombo(intellibendModeBox, intellibendModeLabel, "Intellibend", "intellibend_mode", intellibendModeAttachment);
+
+    setSize (650, 520);
     
     startTimerHz(60); // 60 FPS for smooth waveform updates
 }
@@ -28,32 +68,95 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
 PluginEditor::~PluginEditor()
 {
     stopTimer();
+    setLookAndFeel(nullptr);
 }
 
 void PluginEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    g.fillAll (juce::Colour(0xff121316)); // Darker modern background
+
+    // Draw panel backgrounds
+    auto area = getLocalBounds();
+    area.removeFromTop(30);
+    area.removeFromTop(150); // visArea
+    
+    auto panelArea = area.reduced(10);
+    int pW = panelArea.getWidth() / 3;
+    
+    g.setColour(juce::Colour(0xff1A1C20));
+    g.fillRoundedRectangle(panelArea.removeFromLeft(pW).reduced(5).toFloat(), 10.0f);
+    g.fillRoundedRectangle(panelArea.removeFromLeft(pW).reduced(5).toFloat(), 10.0f);
+    g.fillRoundedRectangle(panelArea.reduced(5).toFloat(), 10.0f);
+    
+    // Panel Titles
+    g.setColour(juce::Colours::white.withAlpha(0.6f));
+    g.setFont(juce::Font(16.0f, juce::Font::bold));
+    
+    auto titleArea = getLocalBounds().reduced(10).withTop(185);
+    g.drawText("Input Settings", titleArea.removeFromLeft(pW).withHeight(30), juce::Justification::centred);
+    g.drawText("Musical Scale", titleArea.removeFromLeft(pW).withHeight(30), juce::Justification::centred);
+    g.drawText("Expressiveness", titleArea.withHeight(30), juce::Justification::centred);
 }
 
 void PluginEditor::resized()
 {
     auto area = getLocalBounds();
     
-    // 0. Place Calibrate Button and Label at the very top (30px)
+    // 0. Calibrate Top Bar
     auto calibrationArea = area.removeFromTop(30).reduced(2);
     calibrateButton.setBounds(calibrationArea.removeFromLeft(120));
     calibrationLabel.setBounds(calibrationArea);
     
-    // 1. Place HUD display at the top (80px height) next to TimbreMeter
-    auto topArea = area.removeFromTop(80).reduced(10);
-    timbreMeter.setBounds(topArea.removeFromRight(40));
-    hud.setBounds(topArea.reduced(2));
+    // 1. Visualizer and HUD
+    auto visArea = area.removeFromTop(150).reduced(10);
+    auto topVis = visArea.removeFromTop(30);
+    timbreMeter.setBounds(topVis.removeFromRight(30));
+    hud.setBounds(topVis);
+    visualizer.setBounds(visArea);
     
-    // 2. Place Waveform visualizer in the middle (120px height)
-    visualizer.setBounds(area.removeFromTop(120).reduced(10));
+    // 2. Three Panels
+    auto panelArea = area.reduced(10);
+    panelArea.removeFromTop(30); // Titles space
+    int pW = panelArea.getWidth() / 3;
     
-    // 3. The generic editor takes the remaining space at the bottom for parameter sliders
-    genericEditor.setBounds(area);
+    auto leftPanel = panelArea.removeFromLeft(pW).reduced(10);
+    auto midPanel = panelArea.removeFromLeft(pW).reduced(10);
+    auto rightPanel = panelArea.reduced(10);
+    
+    // Helpers
+    auto placeSlider = [](juce::Slider& s, juce::Label& l, juce::Rectangle<int>& bounds) {
+        auto r = bounds.removeFromLeft(bounds.getWidth() / 2);
+        s.setBounds(r.withTrimmedBottom(20));
+        l.setBounds(r.withTop(s.getBottom()).withHeight(20));
+    };
+    
+    auto placeCombo = [](juce::ComboBox& c, juce::Label& l, juce::Rectangle<int>& bounds, int divisor) {
+        auto row = bounds.removeFromTop(bounds.getHeight() / divisor);
+        l.setBounds(row.removeFromTop(20));
+        c.setBounds(row.reduced(5, (row.getHeight() - 24) / 2));
+    };
+
+    // Left Panel (4 sliders)
+    auto row1L = leftPanel.removeFromTop(leftPanel.getHeight() / 2);
+    auto row2L = leftPanel;
+    placeSlider(inputGainSlider, inputGainLabel, row1L);
+    placeSlider(gateThresholdSlider, gateThresholdLabel, row1L);
+    placeSlider(minFreqSlider, minFreqLabel, row2L);
+    placeSlider(maxFreqSlider, maxFreqLabel, row2L);
+
+    // Mid Panel (4 combos)
+    placeCombo(scaleRootBox, scaleRootLabel, midPanel, 4);
+    placeCombo(scaleTypeBox, scaleTypeLabel, midPanel, 3);
+    placeCombo(trackingModeBox, trackingModeLabel, midPanel, 2);
+    placeCombo(expressionCCBox, expressionCCLabel, midPanel, 1);
+
+    // Right Panel (2 combos, 2 sliders)
+    auto rightComboArea = rightPanel.removeFromTop(rightPanel.getHeight() / 2);
+    placeCombo(intellibendModeBox, intellibendModeLabel, rightComboArea, 2);
+    placeCombo(pitchBendRangeBox, pitchBendRangeLabel, rightComboArea, 1);
+    
+    placeSlider(intellibendStickinessSlider, intellibendStickinessLabel, rightPanel);
+    placeSlider(pitchBendGlideSlider, pitchBendGlideLabel, rightPanel);
 }
 
 void PluginEditor::timerCallback()
