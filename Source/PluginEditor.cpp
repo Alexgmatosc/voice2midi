@@ -10,8 +10,17 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
     addAndMakeVisible(hud);
     addAndMakeVisible(timbreMeter);
     
+    addAndMakeVisible(calibrateButton);
+    calibrateButton.onClick = [this] {
+        audioProcessor.getCalibrationManager().startCalibration();
+    };
+    
+    addAndMakeVisible(calibrationLabel);
+    calibrationLabel.setJustificationType(juce::Justification::centred);
+    calibrationLabel.setColour(juce::Label::textColourId, juce::Colours::yellow);
+    
     // Increased size to accommodate HUD, Waveform and the new scale/glide parameters
-    setSize (450, 530);
+    setSize (450, 580);
     
     startTimerHz(60); // 60 FPS for smooth waveform updates
 }
@@ -29,6 +38,11 @@ void PluginEditor::paint (juce::Graphics& g)
 void PluginEditor::resized()
 {
     auto area = getLocalBounds();
+    
+    // 0. Place Calibrate Button and Label at the very top (30px)
+    auto calibrationArea = area.removeFromTop(30).reduced(2);
+    calibrateButton.setBounds(calibrationArea.removeFromLeft(120));
+    calibrationLabel.setBounds(calibrationArea);
     
     // 1. Place HUD display at the top (80px height) next to TimbreMeter
     auto topArea = area.removeFromTop(80).reduced(10);
@@ -65,4 +79,39 @@ void PluginEditor::timerCallback()
     // 3. Update HUD and TimbreMeter states
     hud.updateState(playingNote, pitchHz);
     timbreMeter.setCentroidValue(centroid);
+    
+    // 4. Update Calibration State
+    auto& calMgr = audioProcessor.getCalibrationManager();
+    auto state = calMgr.getCurrentState();
+    
+    if (state == v2m::CalibrationManager::State::Inactive)
+    {
+        calibrationLabel.setText("", juce::dontSendNotification);
+    }
+    else if (state == v2m::CalibrationManager::State::MeasuringNoise)
+    {
+        calibrationLabel.setText("Stay silent (Measuring background noise...)", juce::dontSendNotification);
+    }
+    else if (state == v2m::CalibrationManager::State::MeasuringVocalRange)
+    {
+        calibrationLabel.setText("Sing your range (Aaa/Ooo)...", juce::dontSendNotification);
+    }
+    else if (state == v2m::CalibrationManager::State::Completed)
+    {
+        calibrationLabel.setText("Calibration Done!", juce::dontSendNotification);
+        
+        // Grab values from atomic storage and push to APVTS via parameter attachments
+        auto& apvts = audioProcessor.getAPVTS();
+        if (auto p = apvts.getParameter("gate_threshold"))
+            p->setValueNotifyingHost(p->convertTo0to1(calMgr.getGateThresholdDb()));
+        
+        if (auto p = apvts.getParameter("min_freq"))
+            p->setValueNotifyingHost(p->convertTo0to1(calMgr.getMinFreqHz()));
+            
+        if (auto p = apvts.getParameter("max_freq"))
+            p->setValueNotifyingHost(p->convertTo0to1(calMgr.getMaxFreqHz()));
+            
+        // Reset state so we don't spam updates
+        calMgr.markAsInactive();
+    }
 }

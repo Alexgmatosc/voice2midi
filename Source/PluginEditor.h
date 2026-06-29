@@ -23,6 +23,9 @@ private:
     v2m::WaveformVisualizer visualizer;
     v2m::HUDDisplay hud;
     v2m::TimbreMeter timbreMeter;
+    
+    juce::TextButton calibrateButton { "Calibrate Voice" };
+    juce::Label calibrationLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };

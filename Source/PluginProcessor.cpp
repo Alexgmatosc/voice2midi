@@ -19,6 +19,8 @@ VoiceToMidiProcessor::VoiceToMidiProcessor()
     pitchBendGlideParameter = apvts.getRawParameterValue("pitch_bend_glide");
     trackingModeParameter = apvts.getRawParameterValue("tracking_mode");
     expressionCCParameter = apvts.getRawParameterValue("expression_cc");
+    intellibendModeParameter = apvts.getRawParameterValue("intellibend_mode");
+    intellibendStickinessParameter = apvts.getRawParameterValue("intellibend_stickiness");
 }
 
 VoiceToMidiProcessor::~VoiceToMidiProcessor()
@@ -63,6 +65,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout VoiceToMidiProcessor::create
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID("expression_cc", 1), "Expression Target CC",
         juce::StringArray{"1 - ModWheel", "74 - Brightness/Timbre", "11 - Expression"}, 1));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID("intellibend_mode", 1), "Intellibend Mode",
+        juce::StringArray{"Sticky", "Raw/True"}, 0));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("intellibend_stickiness", 1), "Intellibend Stickiness (cents)", 0.0f, 100.0f, 25.0f));
 
     return layout;
 }
@@ -160,6 +169,9 @@ void VoiceToMidiProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     // Pre-allocate thread-safe window buffers
     yinWindowBuffer.resize(2048, 0.0f);
     fftWindowBuffer.resize(1024, 0.0f);
+    
+    // Prepare Calibration Manager
+    calibrationManager.prepare(sampleRate);
 }
 
 void VoiceToMidiProcessor::releaseResources()
@@ -308,6 +320,9 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         medianFilter.reset();
     }
 
+    // Process calibration logic (will do nothing if inactive)
+    calibrationManager.processBlock(inData, buffer.getNumSamples(), detectedPitchHz, currentDb);
+
     // 5. Timbre CC modulation (Vowels)
     float normCentroid = 0.0f;
     if (gateOpenForMelody)
@@ -334,6 +349,9 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     // choice 0 is CC 1 (ModWheel), 1 is CC 74 (Brightness), 2 is CC 11 (Expression)
     int targetCC = (expressionCCIndex == 0) ? 1 : (expressionCCIndex == 1) ? 74 : 11;
 
+    int intellibendMode = static_cast<int>(*intellibendModeParameter);
+    float stickinessCents = *intellibendStickinessParameter;
+
     // We pass the linear amplitude to map to MIDI velocity
     float linearVel = envelopeFollower.getCurrentEnvelope();
     
@@ -341,6 +359,7 @@ void VoiceToMidiProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     midiGenerator.processBlock(currentDb, gateThreshold, bypassGate, detectedPitchHz, linearVel, bendRangeSemi,
                                scaleRoot, scaleType, glideMs,
                                normCentroid, targetCC,
+                               intellibendMode, stickinessCents,
                                buffer.getNumSamples(), midiMessages);
 
     currentLevelDb.store(currentDb);

@@ -1,196 +1,129 @@
-SYSTEM CONTEXT & TECHNICAL SPECIFICATION (V4 - "DUBLER" EXPERIENCE & POST-MVP)
+SYSTEM DIRECTIVE: DUBLEAR-STYLE EXPRESSIVITY & CORE ENHANCEMENTS
 
-Project: Pro Vocal MIDI Controller (Voice-to-MIDI & Beatbox-to-MIDI)
-Role of the AI: You are a Senior C++ Audio DSP Architect specialized in the JUCE 8 framework. Your goal is to write highly optimized, real-time safe, and mathematically rigorous audio processing code to create a multi-dimensional vocal controller.
+To: Antigravity (AI Coding Agent)
+Context: We are upgrading voice2midi to match the expressive capabilities of Vochlea Dubler 2. This requires integrating real-time spectral analysis, high-speed transient detection, and an auto-calibration system.
 
-1. PROJECT OBJECTIVE & SCOPE
+TASK 1: Spectral Analyzer (Vowels to MIDI CC)
 
-Transform the existing Voice-to-MIDI MVP into a premium real-time vocal instrument. The application/plugin must capture monophonic microphone input to detect pitch (Melody) with extremely low latency ($< 10\text{ ms}$), extract timbral characteristics (Vowels mapped to MIDI CC), and instantly detect transient unvoiced bursts (Beatbox mapped to Drum MIDI).
+Class: SpectralAnalyzer
 
-2. TECH STACK & BUILD SYSTEM
+Implementation: Integrate juce::dsp::FFT.
 
-Language: C++20 standard.
+Math: Compute the Spectral Centroid of each audio block using:
 
-Framework: JUCE 8.
 
-Build System: CMake (juce_add_plugin with FORMATS Standalone VST3 AU).
+$$Centroid = \frac{\sum_{n=0}^{N/2-1} f(n) \cdot |X(n)|}{\sum_{n=0}^{N/2-1} |X(n)|}$$
 
-Core Algorithms: YIN Algorithm (Pitch), Spectral Centroid via FFT (Timbre), Energy Derivative (Onset/Beatbox).
 
-Parameter Management: juce::AudioProcessorValueTreeState (APVTS).
+Where $f(n)$ is the center frequency of bin $n$ and $|X(n)|$ is the magnitude.
 
-3. STRICT REAL-TIME AUDIO THREAD CONSTRAINTS (CRITICAL)
+Mapping: Map this value linearly to the expression_cc parameter.
 
-Code generated for the processBlock function and any sub-calls executed inside the audio loop MUST strictly adhere to the following rules. Failure to do so invalidates the code:
+Safety: Use a pre-allocated circular buffer and Hanning windowing to minimize spectral leakage. Ensure the FFT runs in a non-blocking context (use a dedicated FFT-buffer size, e.g., 512).
 
-NO Dynamic Allocation: No new, malloc(), std::vector::push_back, std::string manipulation, or dynamic resizing inside processBlock. All DSP buffers, circular buffers, and arrays MUST be pre-allocated in prepareToPlay().
+TASK 2: Onset Detector (Beatbox Percussion)
 
-NO Blocking Locks: No std::mutex, std::lock_guard, or OS-level locks. Use std::atomic for primitive parameter reading. For complex data passing to the UI (e.g., drawing waveforms, pitch state), use lock-free queues like juce::AbstractFifo.
+Class: OnsetDetector
 
-NO System Calls: No printf, std::cout, file I/O, or network calls inside processBlock.
+Implementation: Operate in parallel to the PitchDetector (low-latency path).
 
-Parameter Reading: Read parameters via std::atomic<float>* cached pointers provided by APVTS, never via string lookups during the audio callback.
+Math: Use the Energy Derivative method:
 
-FFT Efficiency: Any Fast Fourier Transform (FFT) must use pre-allocated windowing and operate on specific sizes (e.g., 512 or 1024) to avoid CPU spikes.
 
-4. ARCHITECTURE & COMPONENT OVERVIEW
+$$E_{current} = \sum_{n=0}^{N-1} x^2(n)$$
 
-4.1. Core DSP Classes (Existing & Refined)
+$$E_{diff} = E_{current} - E_{prev}$$
 
-VoiceToMidiProcessor: Inherits from juce::AudioProcessor. Manages the APVTS, audio I/O, and MIDI buffer.
 
-PitchDetector (YIN): Dynamic search window based on min/max parameters, processing overlapping windows for high temporal resolution.
+Trigger a MIDI Note (36/38/42) if $E_{diff} > TransientThreshold$.
 
-MedianFilter & NoiseRejecter: Filters outliers and rejects sibilants (ZCR) to stabilize the pitch state machine.
+Band-Limiting: Apply a simple IIR high-pass filter before the derivative to focus on "click" transients (Snare/Hi-Hat) and low-pass for "thump" (Kick).
 
-4.2. New Core DSP Components (The "Dubler" Upgrade)
+Output: Route events exclusively to MIDI Channel 10.
 
-SpectralAnalyzer (Timbre Engine):
+TASK 3: Intelligent Pitch Bend ("Intellibend")
 
-Integrates juce::dsp::FFT.
+Refactor: MidiEventGenerator
 
-Extracts the Spectral Centroid (brightness/vowel shape) from the audio block to differentiate between closed vowels (e.g., "Ooo") and open vowels (e.g., "Aaa").
+Logic: Implement "Stickiness". When the detected frequency is within $x$ cents of a chromatic note (user defined), dampen the Pitch Bend output, forcing the note center.
 
-Maps this continuous value to a user-selectable MIDI CC (e.g., CC 74 or CC 1) to control synthesizer filters.
+True Bend Mode: Implement an alternative mode that follows input pitch rawly for expressive glissandos.
 
-OnsetDetector & DrumClassifier (Beatbox Engine):
+Clamp: Ensure all outputs are clamped via juce::jlimit(0, 16383, Value) to prevent MIDI protocol errors.
 
-Onset Detection: Calculates the energy difference between consecutive micro-blocks (e.g., 64 samples). An instant spike triggers a drum event, bypassing the YIN latency.
+TASK 4: Auto-Calibration Manager
 
-Lightweight Classification: Uses Low/High band energy ratios and ZCR to output Kick (Note 36), Snare (Note 38), or Hi-Hat (Note 42) exclusively on MIDI Channel 10.
+Class: CalibrationManager
 
-4.3. MIDI State Machine (Crucial Logic)
+Logic: Create a "Listen" state.
 
-State: SILENCE. Amplitude $<$ Gate Threshold or unvoiced noise.
+Noise Floor Analysis: Record 2 seconds of silence to establish the background noise floor.
 
-State: ATTACK. Amplitude crosses threshold. Debounce timer starts (5ms-10ms). Generates MIDI Note On (Ch 1).
+Envelope Thresholding: Calculate the RMS of user input during calibration and set gate_threshold to (RMS_Input - NoiseFloor) * 0.8.
 
-State: SUSTAIN.
+Range Mapping: Detect the user's vocal range (Min/Max Hz) and automatically set APVTS parameters for min_frequency and max_frequency.
 
-Pitch Bend: Outputs microtonal Pitch Bend if drift is $< 1$ semitone.
+EXECUTION
 
-Legato: If drift is $> 1$ semitone, generates Note Off/Note On sequence.
+Create Source/DSP/SpectralAnalyzer.h/cpp.
 
-$$NEW$$
+Create Source/DSP/OnsetDetector.h/cpp.
 
- Timbre Control: Continuously outputs MIDI CC messages based on the Spectral Centroid fluctuations.
+Create Source/DSP/CalibrationManager.h/cpp.
 
-State: RELEASE. Amplitude drops. Send MIDI Note Off. Clear pitch bend.
+Integrate these into VoiceToMidiProcessor::processBlock ensuring NO locks and NO dynamic allocations.
 
-4.4. UI & Visual Components (Custom Editor)
+Acknowledge these instructions and start by generating the SpectralAnalyzer header and implementation.
 
-WaveformVisualizer & GateLineOverlay: Lock-free scrolling waveform with an interactive, draggable threshold line.
+Resumen de Mejoras: Transformación a "Vocal Instrument"
 
-HUDDisplay & TuningNeedle: Prominent active note display with a cent-deviation gauge.
+El objetivo es pasar de un simple conversor de Voz -> Nota MIDI a un Instrumento Vocal Expresivo que compita en calidad y sensación con los estándares de la industria (como Dubler 2).
 
-$$NEW$$
+Aquí tienes el resumen de las 4 patas principales que vamos a implementar:
 
- TimbreMeter: Vertical bar showing the current Spectral Centroid value (Vowel mapping).
+1. Motor de Expresividad (Timbre/Vocales)
 
-5. USER PARAMETERS (APVTS DEFINITION)
+Qué es: Mapear la forma de tu boca (tus vocales) a parámetros de control MIDI (MIDI CC).
 
-The APVTS layout must register and maintain the following parameter nodes:
+Por qué: Dubler permite que, si cambias de decir "Ooo" a "Aaa", el filtro de tu sintetizador se abra o cierre. Esto da una expresividad orgánica.
 
-input_gain & gate_threshold: Amplitude and sensitivity.
+Técnica: Calcularemos el Centroide Espectral ($Centroid$). Es el "centro de gravedad" de las frecuencias. Una "i" tiene energía en frecuencias altas (centroide alto), una "o" en bajas (centroide bajo).
 
-pitch_bend_range & pitch_bend_glide: Pitch wheel scaling and smoothing.
 
-min_frequency & max_frequency: YIN optimization limits.
+$$Centroid = \frac{\sum f(n) \cdot |X(n)|}{\sum |X(n)|}$$
 
-scale_root & scale_type: Musical quantization grids.
+2. Motor de Percusión (Beatbox)
 
-$$NEW$$
+Qué es: Disparar sonidos de batería (Bombo, Caja, Charles) con golpes de aire o chasquidos.
 
- tracking_mode: Choice (Melody, Beatbox, Hybrid). Determines active engines.
+Por qué: Permite crear ritmos sin usar las manos, solo con la boca.
 
-$$NEW$$
+Técnica: Detector de Transitorios (Energy Derivative). En lugar de analizar el tono (que es lento), analizaremos el "golpe" de energía instantáneo.
 
- expression_cc: Choice (1 - ModWheel, 74 - Timbre/Brightness, 11 - Expression). Target for vowel mapping.
 
-6. IMPLEMENTATION ROADMAP FOR AI
+$$E_{diff} = \sum x^2(n)_{actual} - \sum x^2(n)_{anterior}$$
 
-Phase 1-7: Core MVP & Refinement ✅
 
-$$x$$
+Si la diferencia supera un umbral, disparas el bombo al instante.
 
- Project Setup, juce_add_plugin integration, and real-time safe constraints established.
+3. Inteligencia Operativa (Auto-Calibración)
 
-$$x$$
+Qué es: Un sistema que "aprende" tu micrófono y tu habitación en 5 segundos.
 
- Audio Capture, CircularBuffer, and EnvelopeFollower.
+Por qué: No todos los micrófonos son iguales ni todas las habitaciones tienen el mismo ruido de fondo.
 
-$$x$$
+Técnica:
 
- YinPitchDetector math and optimization.
+Análisis de ruido: Mide el silencio para quitar el "hiss" de fondo.
 
-$$x$$
+Umbral dinámico: Ajusta el nivel de activación (gate) para que no se disparen notas por respirar.
 
- MidiEventGenerator (State machine, debouncing, pitch bend math).
+Mapeo de rango: Detecta qué tan grave o agudo puedes cantar para limitar las notas automáticamente.
 
-$$x$$
+4. Estabilidad Musical (Intellibend)
 
- Custom GUI (FIFO Waveform, Gate Line, Note HUD).
+Qué es: Un "ancla" inteligente para tu afinación.
 
-$$x$$
+Por qué: Las voces humanas fluctúan naturalmente. Si el plugin es demasiado rígido, suena robótico; si es muy flexible, suena desafinado.
 
- Noise rejection, Median Filtering, and Scale Quantization.
-
-Phase 8: Expressive Control (Vowels to MIDI CC) ✅
-
-$$x$$
-
- Integrate juce::dsp::FFT into a new SpectralAnalyzer class.
-
-$$x$$
-
- Implement strictly lock-free math to compute the Spectral Centroid in real-time.
-
-$$x$$
-
- Update MidiEventGenerator to output MIDI CC messages in the SUSTAIN state based on centroid fluctuations, mapped to the expression_cc parameter.
-
-$$x$$
-
- Add a TimbreMeter component to the UI for visual feedback of the vowel shape.
-
-Phase 9: Percussion Engine (Beatbox to Drums) ✅
-
-$$x$$
-
- Implement an OnsetDetector that operates in parallel to the Pitch Detector, reacting in $< 2\text{ ms}$ using energy derivatives.
-
-$$x$$
-
- Implement a DrumClassifier to quickly categorize the transient (Kick, Snare, Hi-Hat) using basic ZCR and frequency band energy.
-
-$$x$$
-
- Update VoiceToMidiProcessor to route drum events strictly to MIDI Channel 10 when tracking_mode allows it.
-
-7. MATHEMATICAL FORMULAS REFERENCE
-
-Hz to MIDI Note & Pitch Bend:
-
-$$exactMidi = 69.0f + 12.0f \times \log_2\left(\frac{frequency}{440.0f}\right)$$
-
-$$noteNumber = \text{round}(exactMidi)$$
-
-$$cents = (exactMidi - noteNumber) \times 100.0f$$
-
-$$PitchBend = 8192 + \left(\frac{cents}{100.0f \times pitch\_bend\_range}\right) \times 8192$$
-
-(Note on MIDI standard constraints: The value 8192 represents the absolute dead-center of the 14-bit MIDI pitch bend protocol, which strictly operates within a bounded range of 0 to 16383. The pitch_bend_range APVTS variable acts as a vital scaling factor and must mirror the external synthesizer's configured bend range (e.g., $\pm 2$ or $\pm 12$ semitones) to ensure accurate intonation. For instance, a $+50$ cent vocal drift with a 2-semitone range yields a MIDI value of $10240$. In the C++ implementation, this final calculated value must always be clamped via juce::jlimit(0, 16383, PitchBend) before being dispatched to the juce::MidiBuffer to prevent out-of-bounds MIDI errors during extreme vocal glissandos.)
-
-Spectral Centroid (Timbre/Vowel):
-
-$$Centroid = \frac{\sum_{n=0}^{N-1} f(n) \cdot x(n)}{\sum_{n=0}^{N-1} x(n)}$$
-
-(Where $f(n)$ is the center frequency of the bin and $x(n)$ is the magnitude).
-
-Energy Derivative (Onset Detection):
-
-$$E_{current} = \frac{1}{N} \sum_{n=0}^{N-1} x^2(n)$$
-
-$$E_{diff} = E_{current} - E_{previous}$$
-
-(Trigger beatbox event if $E_{diff} > Threshold$).
+Técnica: Implementaremos un sistema de histéresis donde, si estás cerca de una nota correcta, el plugin te "ayuda" a mantenerla, pero si haces un movimiento brusco, te permite hacer un glissando (el bend) suavemente.

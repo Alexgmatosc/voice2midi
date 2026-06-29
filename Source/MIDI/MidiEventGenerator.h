@@ -25,6 +25,7 @@ public:
                       float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
                       int scaleRoot, int scaleType, float glideMs,
                       float normalizedCentroid, int targetCC,
+                      int intellibendMode, float stickinessCents,
                       int numSamples, juce::MidiBuffer& midiMessages);
 
     void reset();

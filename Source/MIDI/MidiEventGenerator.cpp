@@ -32,6 +32,7 @@ void MidiEventGenerator::processBlock(float currentDb, float gateThreshold, bool
                                       float detectedFreqHz, float velocityLinear, int pitchBendRangeSemi,
                                       int scaleRoot, int scaleType, float glideMs,
                                       float normalizedCentroid, int targetCC,
+                                      int intellibendMode, float stickinessCents,
                                       int numSamples, juce::MidiBuffer& midiMessages)
 {
     // State transitions based on Gate with asymmetrical hysteresis
@@ -136,6 +137,29 @@ void MidiEventGenerator::processBlock(float currentDb, float gateThreshold, bool
                 {
                     // Pitch Bend calculation relative to the currently playing (quantized) note
                     float diffSemis = exactMidi - static_cast<float>(currentlyPlayingNote);
+                    
+                    // --- Intellibend Logic ---
+                    if (intellibendMode == 0) // Sticky Mode
+                    {
+                        float diffCents = diffSemis * 100.0f;
+                        float absCents = std::abs(diffCents);
+                        float multiplier = 0.0f;
+                        
+                        // Soft-knee transition past the stickiness threshold
+                        if (absCents > stickinessCents)
+                        {
+                            // Avoid division by zero
+                            float safeThreshold = stickinessCents > 0.1f ? stickinessCents : 0.1f;
+                            multiplier = (absCents - safeThreshold) / safeThreshold;
+                            multiplier = juce::jlimit(0.0f, 1.0f, multiplier);
+                        }
+                        
+                        // Apply stickiness damping
+                        diffSemis = (diffCents * multiplier) / 100.0f;
+                    }
+                    // If intellibendMode == 1 (Raw/True Bend Mode), do nothing (use raw diffSemis)
+                    // ------------------------
+                    
                     float bendNormalized = diffSemis / static_cast<float>(pitchBendRangeSemi);
                     bendNormalized = juce::jlimit(-1.0f, 1.0f, bendNormalized);
                     float targetPitchBend = 8192.0f + (bendNormalized * 8191.0f);

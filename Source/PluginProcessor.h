@@ -11,6 +11,7 @@
 #include "DSP/SpectralAnalyzer.h"
 #include "DSP/OnsetDetector.h"
 #include "DSP/DrumClassifier.h"
+#include "DSP/CalibrationManager.h"
 
 class VoiceToMidiProcessor : public juce::AudioProcessor
 {
@@ -51,6 +52,7 @@ public:
     int getCurrentPlayingNote() const { return currentPlayingNote.load(); }
     float getCurrentCentroid() const { return currentCentroid.load(); }
     v2m::AudioVisualFifo& getVisualFifo() { return visualFifo; }
+    v2m::CalibrationManager& getCalibrationManager() { return calibrationManager; }
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -67,6 +69,8 @@ private:
     std::atomic<float>* pitchBendGlideParameter = nullptr;
     std::atomic<float>* trackingModeParameter = nullptr;
     std::atomic<float>* expressionCCParameter = nullptr;
+    std::atomic<float>* intellibendModeParameter = nullptr;
+    std::atomic<float>* intellibendStickinessParameter = nullptr;
 
     v2m::CircularBuffer circularBuffer;
     v2m::EnvelopeFollower envelopeFollower;
@@ -77,6 +81,7 @@ private:
     v2m::SpectralAnalyzer spectralAnalyzer;
     v2m::OnsetDetector onsetDetector;
     v2m::DrumClassifier drumClassifier;
+    v2m::CalibrationManager calibrationManager;
 
     struct ActiveDrumNote
     {
