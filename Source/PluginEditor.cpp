@@ -53,6 +53,13 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
     setupSlider(pitchBendGlideSlider, pitchBendGlideLabel, "Glide", "pitch_bend_glide", pitchBendGlideAttachment);
     setupSlider(intellibendStickinessSlider, intellibendStickinessLabel, "Stickiness", "intellibend_stickiness", intellibendStickinessAttachment);
 
+    pitchBendRangeBox.addItemList(juce::StringArray{"1", "2", "12", "24"}, 1);
+    scaleRootBox.addItemList(juce::StringArray{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}, 1);
+    scaleTypeBox.addItemList(juce::StringArray{"Chromatic", "Major", "Minor", "Pentatonic"}, 1);
+    trackingModeBox.addItemList(juce::StringArray{"Melody", "Beatbox", "Hybrid"}, 1);
+    expressionCCBox.addItemList(juce::StringArray{"1 - ModWheel", "74 - Brightness/Timbre", "11 - Expression"}, 1);
+    intellibendModeBox.addItemList(juce::StringArray{"Sticky", "Raw/True"}, 1);
+
     setupCombo(pitchBendRangeBox, pitchBendRangeLabel, "PB Range", "pitch_bend_range", pitchBendRangeAttachment);
     setupCombo(scaleRootBox, scaleRootLabel, "Root", "scale_root", scaleRootAttachment);
     setupCombo(scaleTypeBox, scaleTypeLabel, "Scale", "scale_type", scaleTypeAttachment);
