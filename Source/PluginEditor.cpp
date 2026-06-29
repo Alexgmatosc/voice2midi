@@ -19,8 +19,8 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
     calibrationLabel.setJustificationType(juce::Justification::centred);
     calibrationLabel.setColour(juce::Label::textColourId, juce::Colours::yellow);
     
-    // Increased size to accommodate HUD, Waveform and the new scale/glide parameters
-    setSize (450, 580);
+    // Increased size to accommodate HUD, Waveform, Calibrator, and 12 parameter sliders
+    setSize (450, 750);
     
     startTimerHz(60); // 60 FPS for smooth waveform updates
 }
