@@ -60,7 +60,7 @@ PluginEditor::PluginEditor (VoiceToMidiProcessor& p)
     setupCombo(expressionCCBox, expressionCCLabel, "Express CC", "expression_cc", expressionCCAttachment);
     setupCombo(intellibendModeBox, intellibendModeLabel, "Intellibend", "intellibend_mode", intellibendModeAttachment);
 
-    setSize (650, 520);
+    setSize (750, 580); // Increased width and height for better spacing
     
     startTimerHz(60); // 60 FPS for smooth waveform updates
 }
@@ -78,7 +78,7 @@ void PluginEditor::paint (juce::Graphics& g)
     // Draw panel backgrounds
     auto area = getLocalBounds();
     area.removeFromTop(30);
-    area.removeFromTop(150); // visArea
+    area.removeFromTop(160); // visArea
     
     auto panelArea = area.reduced(10);
     int pW = panelArea.getWidth() / 3;
@@ -90,9 +90,9 @@ void PluginEditor::paint (juce::Graphics& g)
     
     // Panel Titles
     g.setColour(juce::Colours::white.withAlpha(0.6f));
-    g.setFont(juce::Font(16.0f, juce::Font::bold));
+    g.setFont(juce::FontOptions(16.0f, juce::Font::bold));
     
-    auto titleArea = getLocalBounds().reduced(10).withTop(185);
+    auto titleArea = getLocalBounds().reduced(10).withTop(200);
     g.drawText("Input Settings", titleArea.removeFromLeft(pW).withHeight(30), juce::Justification::centred);
     g.drawText("Musical Scale", titleArea.removeFromLeft(pW).withHeight(30), juce::Justification::centred);
     g.drawText("Expressiveness", titleArea.withHeight(30), juce::Justification::centred);
@@ -108,15 +108,15 @@ void PluginEditor::resized()
     calibrationLabel.setBounds(calibrationArea);
     
     // 1. Visualizer and HUD
-    auto visArea = area.removeFromTop(150).reduced(10);
-    auto topVis = visArea.removeFromTop(30);
-    timbreMeter.setBounds(topVis.removeFromRight(30));
-    hud.setBounds(topVis);
+    auto visArea = area.removeFromTop(160).reduced(10);
+    auto topVis = visArea.removeFromTop(70); // Give HUD more height (70px)
+    timbreMeter.setBounds(topVis.removeFromRight(50));
+    hud.setBounds(topVis.reduced(10, 0));
     visualizer.setBounds(visArea);
     
     // 2. Three Panels
     auto panelArea = area.reduced(10);
-    panelArea.removeFromTop(30); // Titles space
+    panelArea.removeFromTop(40); // Titles space
     int pW = panelArea.getWidth() / 3;
     
     auto leftPanel = panelArea.removeFromLeft(pW).reduced(10);
@@ -124,8 +124,8 @@ void PluginEditor::resized()
     auto rightPanel = panelArea.reduced(10);
     
     // Helpers
-    auto placeSlider = [](juce::Slider& s, juce::Label& l, juce::Rectangle<int>& bounds) {
-        auto r = bounds.removeFromLeft(bounds.getWidth() / 2);
+    auto placeSlider = [](juce::Slider& s, juce::Label& l, juce::Rectangle<int>& bounds, float widthProportion) {
+        auto r = bounds.removeFromLeft(bounds.getWidth() * widthProportion);
         s.setBounds(r.withTrimmedBottom(20));
         l.setBounds(r.withTop(s.getBottom()).withHeight(20));
     };
@@ -139,10 +139,10 @@ void PluginEditor::resized()
     // Left Panel (4 sliders)
     auto row1L = leftPanel.removeFromTop(leftPanel.getHeight() / 2);
     auto row2L = leftPanel;
-    placeSlider(inputGainSlider, inputGainLabel, row1L);
-    placeSlider(gateThresholdSlider, gateThresholdLabel, row1L);
-    placeSlider(minFreqSlider, minFreqLabel, row2L);
-    placeSlider(maxFreqSlider, maxFreqLabel, row2L);
+    placeSlider(inputGainSlider, inputGainLabel, row1L, 0.5f);
+    placeSlider(gateThresholdSlider, gateThresholdLabel, row1L, 1.0f);
+    placeSlider(minFreqSlider, minFreqLabel, row2L, 0.5f);
+    placeSlider(maxFreqSlider, maxFreqLabel, row2L, 1.0f);
 
     // Mid Panel (4 combos)
     placeCombo(scaleRootBox, scaleRootLabel, midPanel, 4);
@@ -155,8 +155,8 @@ void PluginEditor::resized()
     placeCombo(intellibendModeBox, intellibendModeLabel, rightComboArea, 2);
     placeCombo(pitchBendRangeBox, pitchBendRangeLabel, rightComboArea, 1);
     
-    placeSlider(intellibendStickinessSlider, intellibendStickinessLabel, rightPanel);
-    placeSlider(pitchBendGlideSlider, pitchBendGlideLabel, rightPanel);
+    placeSlider(intellibendStickinessSlider, intellibendStickinessLabel, rightPanel, 0.5f);
+    placeSlider(pitchBendGlideSlider, pitchBendGlideLabel, rightPanel, 1.0f);
 }
 
 void PluginEditor::timerCallback()
