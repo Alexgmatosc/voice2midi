@@ -62,3 +62,28 @@ target_link_libraries(voice2midi PRIVATE
 
 # Set IDE folders
 set_target_properties(voice2midi PROPERTIES FOLDER "Plugins")
+
+# ==============================================================================
+# Add Tests Target
+# ==============================================================================
+juce_add_console_app(voice2midi_tests
+    PRODUCT_NAME "voice2midi_tests"
+)
+target_sources(voice2midi_tests PRIVATE
+    Source/Tests/TestRunner.cpp
+    Source/Tests/YinPitchDetectorTests.cpp
+    Source/Tests/MidiEventGeneratorTests.cpp
+    Source/Tests/CircularBufferTests.cpp
+    Source/DSP/YinPitchDetector.cpp
+    Source/MIDI/MidiEventGenerator.cpp
+)
+juce_generate_juce_header(voice2midi_tests)
+target_compile_features(voice2midi_tests PUBLIC cxx_std_20)
+target_include_directories(voice2midi_tests PRIVATE Source)
+target_link_libraries(voice2midi_tests PRIVATE
+    juce::juce_audio_processors
+    juce::juce_dsp
+    juce::juce_core
+    juce::juce_events
+)
+set_target_properties(voice2midi_tests PROPERTIES FOLDER "Tests")
