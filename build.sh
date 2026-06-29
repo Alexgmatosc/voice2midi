@@ -12,9 +12,9 @@ echo "============================================="
 echo "-> Configurando archivos del proyecto con CMake..."
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-# 2. Compilar el proyecto en modo Release usando todos los núcleos de CPU (compila solo la App/Plugin de producción)
+# 2. Compilar el proyecto en modo Release usando todos los núcleos de CPU (compila App y Plugins)
 echo "-> Compilando ejecutables..."
-cmake --build build --config Release --target voice2midi -j$(sysctl -n hw.logicalcpu)
+cmake --build build --config Release -j$(sysctl -n hw.logicalcpu)
 
 echo ""
 echo "============================================="
